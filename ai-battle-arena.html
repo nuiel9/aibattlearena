@@ -104,9 +104,9 @@
     <div id="instructions">
         <h3>🎮 AI BATTLE ARENA</h3>
         <p><strong>WASD</strong>: Move • <strong>Mouse</strong>: Aim • <strong>Click</strong>: Shoot • <strong>R</strong>: Reload • <strong>M</strong>: Toggle Sound</p>
-        <p><strong>Q</strong>: Beam Attack (8s cooldown) • <strong>E</strong>: Freeze Enemies (12s cooldown)</p>
+        <p><strong>Q</strong>: Beam Attack (find 🟠 orange pickups) • <strong>E</strong>: Freeze Enemies (find 🔵 cyan pickups)</p>
         <p>🤖 Smart AI enemies hunt you • 💥 Shoot them before they get you!</p>
-        <p>🎁 Collect ammo and health packs • 📈 Survive endless waves!</p>
+        <p>🎁 Collect: 🟡 Ammo, 🟢 Health, 🟠 Beam, 🔵 Freeze • 📈 Survive endless waves!</p>
     </div>
     
     <div id="gameOver">
@@ -260,10 +260,10 @@
             waveTimer: 0,
             waveTransition: false,
             lastSurvivalPoint: Date.now(),
-            // Special abilities
+            // Special abilities - must be collected
             abilities: {
-                beam: { cooldown: 0, maxCooldown: 8000, duration: 0, active: false },
-                freeze: { cooldown: 0, maxCooldown: 12000, duration: 0, active: false }
+                beam: { charges: 0, duration: 0, active: false },
+                freeze: { charges: 0, duration: 0, active: false }
             },
             beamEffect: null,
             frozenEnemies: new Set()
@@ -370,7 +370,18 @@
         }
         
         function spawnPickup() {
-            const type = Math.random() < 0.6 ? 'ammo' : 'health';
+            const rand = Math.random();
+            let type;
+            if (rand < 0.4) {
+                type = 'ammo';
+            } else if (rand < 0.7) {
+                type = 'health';
+            } else if (rand < 0.85) {
+                type = 'beam';
+            } else {
+                type = 'freeze';
+            }
+            
             gameState.pickups.push({
                 x: 100 + Math.random() * (canvas.width - 200),
                 y: 100 + Math.random() * (canvas.height - 200),
@@ -433,11 +444,11 @@
         }
         
         function activateBeam() {
-            if (gameState.abilities.beam.cooldown > 0 || !gameState.gameRunning) return;
+            if (gameState.abilities.beam.charges <= 0 || !gameState.gameRunning) return;
             
             gameState.abilities.beam.active = true;
             gameState.abilities.beam.duration = 2000; // 2 seconds
-            gameState.abilities.beam.cooldown = gameState.abilities.beam.maxCooldown;
+            gameState.abilities.beam.charges--;
             
             // Play beam sound
             playBeamSound();
@@ -456,11 +467,11 @@
         }
         
         function activateFreeze() {
-            if (gameState.abilities.freeze.cooldown > 0 || !gameState.gameRunning) return;
+            if (gameState.abilities.freeze.charges <= 0 || !gameState.gameRunning) return;
             
             gameState.abilities.freeze.active = true;
             gameState.abilities.freeze.duration = 4000; // 4 seconds
-            gameState.abilities.freeze.cooldown = gameState.abilities.freeze.maxCooldown;
+            gameState.abilities.freeze.charges--;
             
             // Play freeze sound
             playFreezeSound();
@@ -717,15 +728,21 @@
                     if (pickup.type === 'ammo') {
                         gameState.maxAmmo += 10;
                         gameState.ammo = gameState.maxAmmo;
-                    } else {
+                    } else if (pickup.type === 'health') {
                         gameState.player.health = Math.min(100, gameState.player.health + 30);
+                    } else if (pickup.type === 'beam') {
+                        gameState.abilities.beam.charges++;
+                        gameState.score += 25; // Bonus for ability pickup
+                    } else if (pickup.type === 'freeze') {
+                        gameState.abilities.freeze.charges++;
+                        gameState.score += 25; // Bonus for ability pickup
                     }
                     
                     // Play pickup sound
                     playPickupSound();
                     
                     gameState.pickups.splice(i, 1);
-                    gameState.score += 10; // Reduced pickup points
+                    gameState.score += 10; // Base pickup points
                 }
             });
         }
@@ -797,12 +814,36 @@
                 ctx.rotate(pickup.rotation);
                 
                 const size = 15 + Math.sin(pickup.pulse) * 3;
-                ctx.fillStyle = pickup.type === 'ammo' ? '#ffff00' : '#00ff00';
+                
+                // Different colors for different pickup types
+                if (pickup.type === 'ammo') {
+                    ctx.fillStyle = '#ffff00'; // Yellow
+                } else if (pickup.type === 'health') {
+                    ctx.fillStyle = '#00ff00'; // Green
+                } else if (pickup.type === 'beam') {
+                    ctx.fillStyle = '#ff8800'; // Orange
+                } else if (pickup.type === 'freeze') {
+                    ctx.fillStyle = '#00ffff'; // Cyan
+                }
+                
                 ctx.fillRect(-size/2, -size/2, size, size);
                 
-                ctx.strokeStyle = '#ffffff';
-                ctx.lineWidth = 2;
-                ctx.strokeRect(-size/2, -size/2, size, size);
+                // Special outline for abilities
+                if (pickup.type === 'beam' || pickup.type === 'freeze') {
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 3;
+                    ctx.strokeRect(-size/2, -size/2, size, size);
+                    
+                    // Glowing effect for abilities
+                    ctx.shadowColor = pickup.type === 'beam' ? '#ff8800' : '#00ffff';
+                    ctx.shadowBlur = 10;
+                    ctx.strokeRect(-size/2, -size/2, size, size);
+                    ctx.shadowBlur = 0;
+                } else {
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(-size/2, -size/2, size, size);
+                }
                 
                 ctx.restore();
             });
@@ -884,9 +925,7 @@
         }
         
         function updateAbilities() {
-            const now = Date.now();
-            
-            // Update beam ability
+            // Update beam ability duration
             if (gameState.abilities.beam.active) {
                 gameState.abilities.beam.duration -= 16; // ~60fps
                 if (gameState.abilities.beam.duration <= 0) {
@@ -895,26 +934,12 @@
                 }
             }
             
-            if (gameState.abilities.beam.cooldown > 0) {
-                gameState.abilities.beam.cooldown -= 16;
-                if (gameState.abilities.beam.cooldown <= 0) {
-                    playAbilityCooldownSound();
-                }
-            }
-            
-            // Update freeze ability
+            // Update freeze ability duration
             if (gameState.abilities.freeze.active) {
                 gameState.abilities.freeze.duration -= 16;
                 if (gameState.abilities.freeze.duration <= 0) {
                     gameState.abilities.freeze.active = false;
                     gameState.frozenEnemies.clear();
-                }
-            }
-            
-            if (gameState.abilities.freeze.cooldown > 0) {
-                gameState.abilities.freeze.cooldown -= 16;
-                if (gameState.abilities.freeze.cooldown <= 0) {
-                    playAbilityCooldownSound();
                 }
             }
         }
@@ -927,16 +952,13 @@
             document.getElementById('kills').textContent = gameState.kills;
             
             // Update ability display
-            const beamCooldown = Math.max(0, Math.ceil(gameState.abilities.beam.cooldown / 1000));
-            const freezeCooldown = Math.max(0, Math.ceil(gameState.abilities.freeze.cooldown / 1000));
-            
             document.getElementById('beam').textContent = 
                 gameState.abilities.beam.active ? 'ACTIVE!' : 
-                beamCooldown > 0 ? `${beamCooldown}s` : 'Ready';
+                gameState.abilities.beam.charges > 0 ? `x${gameState.abilities.beam.charges}` : 'Need Pickup';
                 
             document.getElementById('freeze').textContent = 
                 gameState.abilities.freeze.active ? 'ACTIVE!' : 
-                freezeCooldown > 0 ? `${freezeCooldown}s` : 'Ready';
+                gameState.abilities.freeze.charges > 0 ? `x${gameState.abilities.freeze.charges}` : 'Need Pickup';
             
             // Add survival points much slower - only every 60 frames (1 second)
             if (Date.now() - gameState.lastSurvivalPoint > 1000) {
@@ -977,10 +999,10 @@
                 waveTimer: 0,
                 waveTransition: false,
                 lastSurvivalPoint: Date.now(),
-                // Special abilities
+                // Special abilities - must be collected
                 abilities: {
-                    beam: { cooldown: 0, maxCooldown: 8000, duration: 0, active: false },
-                    freeze: { cooldown: 0, maxCooldown: 12000, duration: 0, active: false }
+                    beam: { charges: 0, duration: 0, active: false },
+                    freeze: { charges: 0, duration: 0, active: false }
                 },
                 beamEffect: null,
                 frozenEnemies: new Set()
