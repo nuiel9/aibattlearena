@@ -107,7 +107,7 @@
         <p><strong>WASD</strong>: Move • <strong>Mouse</strong>: Aim • <strong>Click</strong>: Shoot • <strong>R</strong>: Reload • <strong>M</strong>: Toggle Sound</p>
         <p><strong>Q</strong>: Beam Attack (find 🟠 orange) • <strong>E</strong>: Freeze (find 🔵 cyan) • <strong>X</strong>: NUKE (collect 5 🔴 red energy)</p>
         <p>🤖 Smart AI enemies hunt you • 💥 Shoot them before they get you!</p>
-        <p>🎁 Collect: 🟡 Ammo, 🟢 Health, 🟠 Beam, 🔵 Freeze, 🔴 Energy • 📈 Survive endless waves!</p>
+        <p>🎁 Collect: 🟡 Ammo (25%), 🟢 Health (20%), 🟠 Beam (20%), 🔵 Freeze (15%), 🔴 Energy (20%) • 📈 Survive endless waves!</p>
     </div>
     
     <div id="gameOver">
@@ -398,17 +398,17 @@
         function spawnPickup() {
             const rand = Math.random();
             let type;
-            // Better balanced drop rates for more ability usage
-            if (rand < 0.3) {
+            // Better balanced drop rates - increased energy for nuke accessibility
+            if (rand < 0.25) {
                 type = 'ammo';
-            } else if (rand < 0.55) {
+            } else if (rand < 0.45) {
                 type = 'health';
-            } else if (rand < 0.75) {
-                type = 'beam';  // Increased from 15% to 20%
-            } else if (rand < 0.9) {
-                type = 'freeze'; // Increased from 13% to 15%
+            } else if (rand < 0.65) {
+                type = 'beam';  // 20%
+            } else if (rand < 0.8) {
+                type = 'freeze'; // 15%
             } else {
-                type = 'energy'; // Increased from 7% to 10%
+                type = 'energy'; // Increased to 20%! Much more accessible
             }
             
             gameState.pickups.push({
@@ -861,6 +861,20 @@
                     for (let i = 0; i < 3; i++) {
                         setTimeout(() => spawnPickup(), i * 500);
                     }
+                }
+                
+                // Guarantee energy pickups periodically for nuke accessibility
+                if (gameState.wave % 3 === 0) {
+                    // Every 3rd wave gets guaranteed energy pickup
+                    setTimeout(() => {
+                        gameState.pickups.push({
+                            x: 100 + Math.random() * (canvas.width - 200),
+                            y: 100 + Math.random() * (canvas.height - 200),
+                            type: 'energy',
+                            rotation: 0,
+                            pulse: 0
+                        });
+                    }, 1000);
                 }
                 
                 // Show wave complete message
