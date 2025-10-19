@@ -133,7 +133,9 @@
             mouse: { x: 0, y: 0, down: false },
             gameRunning: true,
             lastShot: 0,
-            waveTimer: 0
+            waveTimer: 0,
+            waveTransition: false,
+            lastSurvivalPoint: Date.now()
         };
         
         // Initialize game
@@ -175,9 +177,10 @@
         }
         
         function spawnWave() {
-            const enemyCount = 3 + gameState.wave * 2;
+            // Much slower wave scaling - more reasonable progression
+            const enemyCount = Math.min(2 + Math.floor(gameState.wave * 1.5), 15); // Cap at 15 enemies max
             for (let i = 0; i < enemyCount; i++) {
-                setTimeout(() => spawnEnemy(), i * 1000);
+                setTimeout(() => spawnEnemy(), i * 2000); // 2 second delay between spawns
             }
             
             // Spawn pickups
@@ -400,7 +403,7 @@
                         }
                         
                         if (enemy.health <= 0) {
-                            gameState.score += 100;
+                            gameState.score += 25; // Reduced kill points
                             gameState.kills++;
                             gameState.enemies.splice(j, 1);
                             
@@ -440,7 +443,7 @@
                     }
                     
                     gameState.pickups.splice(i, 1);
-                    gameState.score += 50;
+                    gameState.score += 10; // Reduced pickup points
                 }
             });
         }
@@ -460,10 +463,16 @@
         }
         
         function checkWaveComplete() {
-            if (gameState.enemies.length === 0) {
+            if (gameState.enemies.length === 0 && !gameState.waveTransition) {
+                gameState.waveTransition = true;
                 gameState.wave++;
-                gameState.score += gameState.wave * 100;
-                setTimeout(() => spawnWave(), 2000);
+                gameState.score += gameState.wave * 50; // Reduced wave bonus
+                
+                // Show wave complete message
+                setTimeout(() => {
+                    gameState.waveTransition = false;
+                    spawnWave();
+                }, 3000); // Longer pause between waves
             }
         }
         
@@ -561,7 +570,11 @@
             document.getElementById('wave').textContent = gameState.wave;
             document.getElementById('kills').textContent = gameState.kills;
             
-            gameState.score += 1;
+            // Add survival points much slower - only every 60 frames (1 second)
+            if (Date.now() - gameState.lastSurvivalPoint > 1000) {
+                gameState.score += Math.max(1, Math.floor(gameState.wave / 5)); // Scale with wave
+                gameState.lastSurvivalPoint = Date.now();
+            }
         }
         
         function endGame() {
@@ -589,7 +602,9 @@
                 mouse: { x: 0, y: 0, down: false },
                 gameRunning: true,
                 lastShot: 0,
-                waveTimer: 0
+                waveTimer: 0,
+                waveTransition: false,
+                lastSurvivalPoint: Date.now()
             };
             
             document.getElementById('gameOver').style.display = 'none';
