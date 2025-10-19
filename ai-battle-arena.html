@@ -101,7 +101,7 @@
     
     <div id="instructions">
         <h3>🎮 AI BATTLE ARENA</h3>
-        <p><strong>WASD</strong>: Move • <strong>Mouse</strong>: Aim • <strong>Click</strong>: Shoot • <strong>R</strong>: Reload</p>
+        <p><strong>WASD</strong>: Move • <strong>Mouse</strong>: Aim • <strong>Click</strong>: Shoot • <strong>R</strong>: Reload • <strong>M</strong>: Toggle Sound</p>
         <p>🤖 Smart AI enemies hunt you • 💥 Shoot them before they get you!</p>
         <p>🎁 Collect ammo and health packs • 📈 Survive endless waves!</p>
     </div>
@@ -115,6 +115,104 @@
     </div>
 
     <script>
+        // Sound system using Web Audio API
+        let audioContext;
+        let soundEnabled = true;
+        
+        function initAudio() {
+            try {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            } catch (e) {
+                console.log('Web Audio API not supported');
+                soundEnabled = false;
+            }
+        }
+        
+        function playSound(frequency, duration, type = 'sine', volume = 0.1, fadeOut = true) {
+            if (!soundEnabled || !audioContext) return;
+            
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            
+            oscillator.frequency.value = frequency;
+            oscillator.type = type;
+            gainNode.gain.value = volume;
+            
+            if (fadeOut) {
+                gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + duration);
+            }
+            
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + duration);
+        }
+        
+        function playShootSound() {
+            if (!soundEnabled) return;
+            // Sharp shooting sound
+            playSound(800, 0.1, 'square', 0.05);
+            setTimeout(() => playSound(400, 0.05, 'sawtooth', 0.03), 50);
+        }
+        
+        function playHitSound() {
+            if (!soundEnabled) return;
+            // Impact sound
+            playSound(200, 0.2, 'sawtooth', 0.08);
+        }
+        
+        function playEnemyDeathSound() {
+            if (!soundEnabled) return;
+            // Explosion sound
+            playSound(150, 0.3, 'sawtooth', 0.1);
+            setTimeout(() => playSound(100, 0.2, 'square', 0.08), 100);
+        }
+        
+        function playPickupSound() {
+            if (!soundEnabled) return;
+            // Pleasant pickup sound
+            playSound(600, 0.2, 'sine', 0.06);
+            setTimeout(() => playSound(800, 0.2, 'sine', 0.04), 100);
+        }
+        
+        function playDamageSound() {
+            if (!soundEnabled) return;
+            // Player damage sound
+            playSound(120, 0.4, 'sawtooth', 0.12);
+        }
+        
+        function playReloadSound() {
+            if (!soundEnabled) return;
+            // Reload click sound
+            playSound(300, 0.1, 'square', 0.04);
+            setTimeout(() => playSound(250, 0.1, 'square', 0.03), 200);
+        }
+        
+        function playWaveCompleteSound() {
+            if (!soundEnabled) return;
+            // Victory fanfare
+            const notes = [523, 659, 784, 1047]; // C5, E5, G5, C6
+            notes.forEach((note, i) => {
+                setTimeout(() => playSound(note, 0.3, 'sine', 0.08), i * 150);
+            });
+        }
+        
+        function playGameOverSound() {
+            if (!soundEnabled) return;
+            // Descending death sound
+            playSound(400, 0.5, 'sawtooth', 0.15);
+            setTimeout(() => playSound(300, 0.5, 'sawtooth', 0.12), 200);
+            setTimeout(() => playSound(200, 0.8, 'sawtooth', 0.1), 400);
+        }
+        
+        function playAmbientDrone() {
+            if (!soundEnabled) return;
+            // Low ambient drone for atmosphere
+            playSound(60, 2, 'sine', 0.02, false);
+            setTimeout(() => playAmbientDrone(), 1800);
+        }
+        
         // Game state
         let canvas, ctx;
         let gameState = {
@@ -145,15 +243,28 @@
             canvas.width = window.innerWidth - 4;
             canvas.height = window.innerHeight - 4;
             
+            initAudio();
             setupControls();
             spawnWave();
             gameLoop();
+            
+            // Start ambient sound after user interaction
+            setTimeout(() => playAmbientDrone(), 2000);
         }
         
         function setupControls() {
             document.addEventListener('keydown', (e) => {
                 gameState.keys[e.code] = true;
                 if (e.code === 'KeyR') reload();
+                if (e.code === 'KeyM') {
+                    soundEnabled = !soundEnabled;
+                    console.log('Sound', soundEnabled ? 'enabled' : 'disabled');
+                }
+                
+                // Resume audio context on first user interaction
+                if (audioContext && audioContext.state === 'suspended') {
+                    audioContext.resume();
+                }
             });
             
             document.addEventListener('keyup', (e) => {
@@ -168,6 +279,12 @@
             
             canvas.addEventListener('mousedown', () => {
                 gameState.mouse.down = true;
+                
+                // Resume audio context on first click
+                if (audioContext && audioContext.state === 'suspended') {
+                    audioContext.resume();
+                }
+                
                 shoot();
             });
             
@@ -251,6 +368,9 @@
             gameState.ammo--;
             gameState.lastShot = Date.now();
             
+            // Play shooting sound
+            playShootSound();
+            
             // Muzzle flash
             for (let i = 0; i < 5; i++) {
                 gameState.particles.push({
@@ -267,6 +387,10 @@
         function reload() {
             if (gameState.reloading || gameState.ammo === gameState.maxAmmo) return;
             gameState.reloading = true;
+            
+            // Play reload sound
+            playReloadSound();
+            
             setTimeout(() => {
                 gameState.ammo = gameState.maxAmmo;
                 gameState.reloading = false;
@@ -351,6 +475,9 @@
                     gameState.player.health -= enemy.type === 'fast' ? 15 : 10;
                     enemy.lastAttack = now;
                     
+                    // Play damage sound
+                    playDamageSound();
+                    
                     // Damage particles
                     for (let j = 0; j < 8; j++) {
                         gameState.particles.push({
@@ -390,6 +517,9 @@
                         enemy.health -= 25;
                         gameState.bullets.splice(i, 1);
                         
+                        // Play hit sound
+                        playHitSound();
+                        
                         // Hit particles
                         for (let k = 0; k < 6; k++) {
                             gameState.particles.push({
@@ -406,6 +536,9 @@
                             gameState.score += 25; // Reduced kill points
                             gameState.kills++;
                             gameState.enemies.splice(j, 1);
+                            
+                            // Play death sound
+                            playEnemyDeathSound();
                             
                             // Death explosion
                             for (let k = 0; k < 12; k++) {
@@ -442,6 +575,9 @@
                         gameState.player.health = Math.min(100, gameState.player.health + 30);
                     }
                     
+                    // Play pickup sound
+                    playPickupSound();
+                    
                     gameState.pickups.splice(i, 1);
                     gameState.score += 10; // Reduced pickup points
                 }
@@ -467,6 +603,9 @@
                 gameState.waveTransition = true;
                 gameState.wave++;
                 gameState.score += gameState.wave * 50; // Reduced wave bonus
+                
+                // Play wave complete sound
+                playWaveCompleteSound();
                 
                 // Show wave complete message
                 setTimeout(() => {
@@ -579,6 +718,10 @@
         
         function endGame() {
             gameState.gameRunning = false;
+            
+            // Play game over sound
+            playGameOverSound();
+            
             document.getElementById('finalScore').textContent = gameState.score;
             document.getElementById('finalWave').textContent = gameState.wave;
             document.getElementById('finalKills').textContent = gameState.kills;
