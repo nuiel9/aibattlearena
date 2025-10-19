@@ -99,14 +99,15 @@
         <div>🏆 Kills: <span id="kills">0</span></div>
         <div>⚡ Beam (Q): <span id="beam">Ready</span></div>
         <div>❄️ Freeze (E): <span id="freeze">Ready</span></div>
+        <div>💥 Nuke (X): <span id="nuke">0/5</span></div>
     </div>
     
     <div id="instructions">
         <h3>🎮 AI BATTLE ARENA</h3>
         <p><strong>WASD</strong>: Move • <strong>Mouse</strong>: Aim • <strong>Click</strong>: Shoot • <strong>R</strong>: Reload • <strong>M</strong>: Toggle Sound</p>
-        <p><strong>Q</strong>: Beam Attack (find 🟠 orange pickups) • <strong>E</strong>: Freeze Enemies (find 🔵 cyan pickups)</p>
+        <p><strong>Q</strong>: Beam Attack (find 🟠 orange) • <strong>E</strong>: Freeze (find 🔵 cyan) • <strong>X</strong>: NUKE (collect 5 🔴 red energy)</p>
         <p>🤖 Smart AI enemies hunt you • 💥 Shoot them before they get you!</p>
-        <p>🎁 Collect: 🟡 Ammo, 🟢 Health, 🟠 Beam, 🔵 Freeze • 📈 Survive endless waves!</p>
+        <p>🎁 Collect: 🟡 Ammo, 🟢 Health, 🟠 Beam, 🔵 Freeze, 🔴 Energy • 📈 Survive endless waves!</p>
     </div>
     
     <div id="gameOver">
@@ -239,6 +240,23 @@
             setTimeout(() => playSound(800, 0.1, 'sine', 0.03), 150);
         }
         
+        function playNukeSound() {
+            if (!soundEnabled) return;
+            // Epic nuclear explosion sound sequence
+            playSound(50, 0.5, 'sawtooth', 0.2); // Deep rumble
+            setTimeout(() => playSound(100, 1.0, 'square', 0.18), 200);
+            setTimeout(() => playSound(200, 1.2, 'sawtooth', 0.15), 400);
+            setTimeout(() => playSound(400, 0.8, 'square', 0.12), 800);
+            setTimeout(() => playSound(600, 0.6, 'sine', 0.1), 1200);
+        }
+        
+        function playEnergyCollectSound() {
+            if (!soundEnabled) return;
+            // Special energy collection sound
+            playSound(1000, 0.3, 'sine', 0.08);
+            setTimeout(() => playSound(1200, 0.2, 'sine', 0.06), 100);
+        }
+        
         // Game state
         let canvas, ctx;
         let gameState = {
@@ -263,10 +281,12 @@
             // Special abilities - must be collected
             abilities: {
                 beam: { charges: 0, duration: 0, active: false },
-                freeze: { charges: 0, duration: 0, active: false }
+                freeze: { charges: 0, duration: 0, active: false },
+                nuke: { energy: 0, maxEnergy: 5, duration: 0, active: false }
             },
             beamEffect: null,
-            frozenEnemies: new Set()
+            frozenEnemies: new Set(),
+            nukeEffect: null
         };
         
         // Initialize game
@@ -295,6 +315,7 @@
                 }
                 if (e.code === 'KeyQ') activateBeam();
                 if (e.code === 'KeyE') activateFreeze();
+                if (e.code === 'KeyX') activateNuke();
                 
                 // Resume audio context on first user interaction
                 if (audioContext && audioContext.state === 'suspended') {
@@ -372,14 +393,16 @@
         function spawnPickup() {
             const rand = Math.random();
             let type;
-            if (rand < 0.4) {
+            if (rand < 0.35) {
                 type = 'ammo';
-            } else if (rand < 0.7) {
+            } else if (rand < 0.65) {
                 type = 'health';
-            } else if (rand < 0.85) {
+            } else if (rand < 0.8) {
                 type = 'beam';
-            } else {
+            } else if (rand < 0.93) {
                 type = 'freeze';
+            } else {
+                type = 'energy'; // Rare energy pickup
             }
             
             gameState.pickups.push({
@@ -490,6 +513,58 @@
                     dy: (Math.random() - 0.5) * 2,
                     life: 60,
                     color: '#00ffff'
+                });
+            }
+        }
+        
+        function activateNuke() {
+            if (gameState.abilities.nuke.energy < gameState.abilities.nuke.maxEnergy || !gameState.gameRunning) return;
+            
+            gameState.abilities.nuke.active = true;
+            gameState.abilities.nuke.duration = 3000; // 3 seconds of effect
+            gameState.abilities.nuke.energy = 0; // Reset energy
+            
+            // Play nuclear sound
+            playNukeSound();
+            
+            // Create massive screen-wide explosion effect
+            gameState.nukeEffect = {
+                radius: 0,
+                maxRadius: Math.max(canvas.width, canvas.height),
+                centerX: canvas.width / 2,
+                centerY: canvas.height / 2
+            };
+            
+            // Kill ALL enemies instantly
+            const enemyCount = gameState.enemies.length;
+            gameState.enemies.forEach(enemy => {
+                gameState.score += 100; // Big bonus for nuke kills
+                gameState.kills++;
+                
+                // Massive death explosions
+                for (let i = 0; i < 20; i++) {
+                    gameState.particles.push({
+                        x: enemy.x,
+                        y: enemy.y,
+                        dx: (Math.random() - 0.5) * 15,
+                        dy: (Math.random() - 0.5) * 15,
+                        life: 50,
+                        color: '#ff0000'
+                    });
+                }
+            });
+            
+            gameState.enemies = []; // Clear all enemies
+            
+            // Create screen-wide particle explosion
+            for (let i = 0; i < 100; i++) {
+                gameState.particles.push({
+                    x: canvas.width/2,
+                    y: canvas.height/2,
+                    dx: (Math.random() - 0.5) * 20,
+                    dy: (Math.random() - 0.5) * 20,
+                    life: 80,
+                    color: Math.random() < 0.5 ? '#ff4400' : '#ffff00'
                 });
             }
         }
@@ -736,6 +811,10 @@
                     } else if (pickup.type === 'freeze') {
                         gameState.abilities.freeze.charges++;
                         gameState.score += 25; // Bonus for ability pickup
+                    } else if (pickup.type === 'energy') {
+                        gameState.abilities.nuke.energy++;
+                        gameState.score += 50; // Big bonus for rare energy
+                        playEnergyCollectSound(); // Special sound for energy
                     }
                     
                     // Play pickup sound
@@ -824,19 +903,25 @@
                     ctx.fillStyle = '#ff8800'; // Orange
                 } else if (pickup.type === 'freeze') {
                     ctx.fillStyle = '#00ffff'; // Cyan
+                } else if (pickup.type === 'energy') {
+                    ctx.fillStyle = '#ff0044'; // Bright red/pink
                 }
                 
                 ctx.fillRect(-size/2, -size/2, size, size);
                 
                 // Special outline for abilities
-                if (pickup.type === 'beam' || pickup.type === 'freeze') {
+                if (pickup.type === 'beam' || pickup.type === 'freeze' || pickup.type === 'energy') {
                     ctx.strokeStyle = '#ffffff';
-                    ctx.lineWidth = 3;
+                    ctx.lineWidth = pickup.type === 'energy' ? 4 : 3; // Extra thick for energy
                     ctx.strokeRect(-size/2, -size/2, size, size);
                     
                     // Glowing effect for abilities
-                    ctx.shadowColor = pickup.type === 'beam' ? '#ff8800' : '#00ffff';
-                    ctx.shadowBlur = 10;
+                    let glowColor = '#ff8800';
+                    if (pickup.type === 'freeze') glowColor = '#00ffff';
+                    if (pickup.type === 'energy') glowColor = '#ff0044';
+                    
+                    ctx.shadowColor = glowColor;
+                    ctx.shadowBlur = pickup.type === 'energy' ? 15 : 10; // Extra glow for energy
                     ctx.strokeRect(-size/2, -size/2, size, size);
                     ctx.shadowBlur = 0;
                 } else {
@@ -862,6 +947,32 @@
             ctx.fillRect(15, -2, 20, 4);
             
             ctx.restore();
+            
+            // Draw nuke explosion effect
+            if (gameState.nukeEffect && gameState.abilities.nuke.active) {
+                const nuke = gameState.nukeEffect;
+                
+                // Create expanding explosion circle
+                const gradient = ctx.createRadialGradient(
+                    nuke.centerX, nuke.centerY, 0,
+                    nuke.centerX, nuke.centerY, nuke.radius
+                );
+                gradient.addColorStop(0, 'rgba(255, 68, 0, 0.8)');
+                gradient.addColorStop(0.3, 'rgba(255, 140, 0, 0.6)');
+                gradient.addColorStop(0.6, 'rgba(255, 255, 0, 0.4)');
+                gradient.addColorStop(1, 'rgba(255, 0, 0, 0)');
+                
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(nuke.centerX, nuke.centerY, nuke.radius, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Add screen flash effect when nuke starts
+                if (nuke.radius < 50) {
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                }
+            }
             
             // Draw beam effect
             if (gameState.beamEffect && gameState.abilities.beam.active) {
@@ -942,6 +1053,18 @@
                     gameState.frozenEnemies.clear();
                 }
             }
+            
+            // Update nuke ability duration and effect
+            if (gameState.abilities.nuke.active) {
+                gameState.abilities.nuke.duration -= 16;
+                if (gameState.nukeEffect) {
+                    gameState.nukeEffect.radius += 8; // Expand explosion
+                }
+                if (gameState.abilities.nuke.duration <= 0) {
+                    gameState.abilities.nuke.active = false;
+                    gameState.nukeEffect = null;
+                }
+            }
         }
         
         function updateUI() {
@@ -959,6 +1082,20 @@
             document.getElementById('freeze').textContent = 
                 gameState.abilities.freeze.active ? 'ACTIVE!' : 
                 gameState.abilities.freeze.charges > 0 ? `x${gameState.abilities.freeze.charges}` : 'Need Pickup';
+                
+            document.getElementById('nuke').textContent = 
+                gameState.abilities.nuke.active ? 'EXPLODING!' : 
+                `${gameState.abilities.nuke.energy}/${gameState.abilities.nuke.maxEnergy}`;
+            
+            // Change nuke color when ready
+            const nukeElement = document.getElementById('nuke');
+            if (gameState.abilities.nuke.energy >= gameState.abilities.nuke.maxEnergy) {
+                nukeElement.style.color = '#ff4400';
+                nukeElement.style.textShadow = '0 0 10px #ff4400';
+            } else {
+                nukeElement.style.color = '#ffffff';
+                nukeElement.style.textShadow = '2px 2px 4px rgba(0,0,0,0.8)';
+            }
             
             // Add survival points much slower - only every 60 frames (1 second)
             if (Date.now() - gameState.lastSurvivalPoint > 1000) {
@@ -1002,10 +1139,12 @@
                 // Special abilities - must be collected
                 abilities: {
                     beam: { charges: 0, duration: 0, active: false },
-                    freeze: { charges: 0, duration: 0, active: false }
+                    freeze: { charges: 0, duration: 0, active: false },
+                    nuke: { energy: 0, maxEnergy: 5, duration: 0, active: false }
                 },
                 beamEffect: null,
-                frozenEnemies: new Set()
+                frozenEnemies: new Set(),
+                nukeEffect: null
             };
             
             document.getElementById('gameOver').style.display = 'none';
