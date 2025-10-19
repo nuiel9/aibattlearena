@@ -356,8 +356,13 @@
                 setTimeout(() => spawnEnemy(), i * 2000); // 2 second delay between spawns
             }
             
-            // Spawn pickups
-            if (Math.random() < 0.7) {
+            // Spawn pickups - increased rate for more action
+            if (Math.random() < 0.9) {  // Increased from 0.7 to 0.9
+                spawnPickup();
+            }
+            
+            // Sometimes spawn multiple pickups in harder waves
+            if (gameState.wave > 3 && Math.random() < 0.4) {
                 spawnPickup();
             }
         }
@@ -393,16 +398,17 @@
         function spawnPickup() {
             const rand = Math.random();
             let type;
-            if (rand < 0.35) {
+            // Better balanced drop rates for more ability usage
+            if (rand < 0.3) {
                 type = 'ammo';
-            } else if (rand < 0.65) {
+            } else if (rand < 0.55) {
                 type = 'health';
-            } else if (rand < 0.8) {
-                type = 'beam';
-            } else if (rand < 0.93) {
-                type = 'freeze';
+            } else if (rand < 0.75) {
+                type = 'beam';  // Increased from 15% to 20%
+            } else if (rand < 0.9) {
+                type = 'freeze'; // Increased from 13% to 15%
             } else {
-                type = 'energy'; // Rare energy pickup
+                type = 'energy'; // Increased from 7% to 10%
             }
             
             gameState.pickups.push({
@@ -849,6 +855,14 @@
                 // Play wave complete sound
                 playWaveCompleteSound();
                 
+                // Bonus pickups for completing waves
+                if (gameState.wave % 5 === 0) {
+                    // Every 5th wave gets extra pickups
+                    for (let i = 0; i < 3; i++) {
+                        setTimeout(() => spawnPickup(), i * 500);
+                    }
+                }
+                
                 // Show wave complete message
                 setTimeout(() => {
                     gameState.waveTransition = false;
@@ -1073,6 +1087,18 @@
             document.getElementById('ammo').textContent = gameState.reloading ? 'RELOADING...' : gameState.ammo;
             document.getElementById('wave').textContent = gameState.wave;
             document.getElementById('kills').textContent = gameState.kills;
+            
+            // Emergency pickup spawning when health is critically low
+            if (gameState.player.health <= 25 && Math.random() < 0.02) {
+                // 2% chance per frame to spawn health when critically injured
+                gameState.pickups.push({
+                    x: 100 + Math.random() * (canvas.width - 200),
+                    y: 100 + Math.random() * (canvas.height - 200),
+                    type: 'health',
+                    rotation: 0,
+                    pulse: 0
+                });
+            }
             
             // Update ability display
             document.getElementById('beam').textContent = 
