@@ -106,7 +106,7 @@
         <h3>🎮 AI BATTLE ARENA</h3>
         <p><strong>WASD</strong>: Move • <strong>Mouse</strong>: Aim • <strong>Click</strong>: Shoot • <strong>R</strong>: Reload • <strong>M</strong>: Toggle Sound</p>
         <p><strong>Q</strong>: Beam Attack (find 🟠 orange) • <strong>E</strong>: Freeze (find 🔵 cyan) • <strong>X</strong>: NUKE (collect 5 🔴 red energy)</p>
-        <p>🤖 Smart AI enemies hunt you • 💥 Shoot them before they get you!</p>
+        <p>🤖 Smart AI enemies hunt you • 🔥 <strong>BOSS FIGHTS every 3rd wave!</strong> • 💥 Shoot them before they get you!</p>
         <p>🎁 Collect: 🟡 Ammo (25%), 🟢 Health (20%), 🟠 Beam (20%), 🔵 Freeze (15%), 🔴 Energy (20%) • 📈 Survive endless waves!</p>
     </div>
     
@@ -257,12 +257,37 @@
             setTimeout(() => playSound(1200, 0.2, 'sine', 0.06), 100);
         }
         
+        function playBossSpawnSound() {
+            if (!soundEnabled) return;
+            // Dramatic boss entry sound
+            playSound(80, 0.8, 'sawtooth', 0.2); // Deep rumble
+            setTimeout(() => playSound(120, 0.6, 'square', 0.15), 300);
+            setTimeout(() => playSound(200, 0.4, 'sine', 0.12), 600);
+        }
+        
+        function playBossShootSound() {
+            if (!soundEnabled) return;
+            // Heavy boss weapon sound
+            playSound(300, 0.3, 'square', 0.1);
+            setTimeout(() => playSound(150, 0.4, 'sawtooth', 0.08), 100);
+        }
+        
+        function playBossDeathSound() {
+            if (!soundEnabled) return;
+            // Epic boss death sequence
+            playSound(100, 1.0, 'sawtooth', 0.18);
+            setTimeout(() => playSound(80, 1.2, 'square', 0.15), 200);
+            setTimeout(() => playSound(60, 1.5, 'sine', 0.12), 500);
+            setTimeout(() => playSound(200, 0.8, 'square', 0.1), 800);
+        }
+        
         // Game state
         let canvas, ctx;
         let gameState = {
             player: { x: 400, y: 300, health: 100, angle: 0 },
             enemies: [],
             bullets: [],
+            enemyBullets: [], // NEW: Boss bullets
             pickups: [],
             particles: [],
             score: 0,
@@ -286,7 +311,9 @@
             },
             beamEffect: null,
             frozenEnemies: new Set(),
-            nukeEffect: null
+            nukeEffect: null,
+            boss: null, // NEW: Current boss enemy
+            bossActive: false // NEW: Boss fight state
         };
         
         // Initialize game
@@ -350,6 +377,12 @@
         }
         
         function spawnWave() {
+            // Check if this is a boss wave (every 3rd wave)
+            if (gameState.wave % 3 === 0) {
+                spawnBoss();
+                return;
+            }
+            
             // Much slower wave scaling - more reasonable progression
             const enemyCount = Math.min(2 + Math.floor(gameState.wave * 1.5), 15); // Cap at 15 enemies max
             for (let i = 0; i < enemyCount; i++) {
@@ -393,6 +426,59 @@
                     targetY: gameState.player.y
                 }
             });
+        }
+        
+        function spawnBoss() {
+            gameState.bossActive = true;
+            
+            // Spawn boss at random side of screen
+            const side = Math.floor(Math.random() * 4);
+            let x, y;
+            
+            switch(side) {
+                case 0: x = canvas.width / 2; y = -80; break;
+                case 1: x = canvas.width + 80; y = canvas.height / 2; break;
+                case 2: x = canvas.width / 2; y = canvas.height + 80; break;
+                case 3: x = -80; y = canvas.height / 2; break;
+            }
+            
+            const bossHealth = 200 + gameState.wave * 50; // Much tankier than regular enemies
+            
+            gameState.boss = {
+                x, y,
+                health: bossHealth,
+                maxHealth: bossHealth,
+                speed: 0.8, // Slower but more threatening
+                size: 60, // Much larger than regular enemies
+                type: 'boss',
+                lastAttack: 0,
+                lastShot: 0,
+                angle: 0,
+                phase: 1, // Boss has different attack phases
+                shotPattern: 0,
+                ai: {
+                    state: 'approach',
+                    lastDecision: 0,
+                    targetX: canvas.width / 2,
+                    targetY: canvas.height / 2,
+                    circleAngle: 0
+                }
+            };
+            
+            // Play boss spawn sound
+            playBossSpawnSound();
+            
+            // Boss spawn particles
+            for (let i = 0; i < 30; i++) {
+                gameState.particles.push({
+                    x: gameState.boss.x,
+                    y: gameState.boss.y,
+                    dx: (Math.random() - 0.5) * 10,
+                    dy: (Math.random() - 0.5) * 10,
+                    life: 60,
+                    color: '#ff0044'
+                });
+            }
         }
         
         function spawnPickup() {
@@ -648,6 +734,11 @@
         }
         
         function updateEnemies() {
+            // Update boss separately if active
+            if (gameState.bossActive && gameState.boss) {
+                updateBoss();
+            }
+            
             gameState.enemies.forEach((enemy, i) => {
                 // Check if enemy is frozen
                 if (gameState.frozenEnemies.has(i)) {
@@ -736,6 +827,7 @@
         }
         
         function updateBullets() {
+            // Update player bullets
             gameState.bullets.forEach((bullet, i) => {
                 bullet.x += bullet.dx;
                 bullet.y += bullet.dy;
@@ -746,6 +838,59 @@
                     bullet.y < 0 || bullet.y > canvas.height) {
                     gameState.bullets.splice(i, 1);
                     return;
+                }
+                
+                // Check boss hits
+                if (gameState.bossActive && gameState.boss) {
+                    const dist = Math.sqrt((bullet.x - gameState.boss.x) ** 2 + (bullet.y - gameState.boss.y) ** 2);
+                    if (dist < gameState.boss.size / 2) {
+                        gameState.boss.health -= 25;
+                        gameState.bullets.splice(i, 1);
+                        
+                        // Play hit sound
+                        playHitSound();
+                        
+                        // Boss hit particles
+                        for (let k = 0; k < 8; k++) {
+                            gameState.particles.push({
+                                x: gameState.boss.x,
+                                y: gameState.boss.y,
+                                dx: (Math.random() - 0.5) * 6,
+                                dy: (Math.random() - 0.5) * 6,
+                                life: 20,
+                                color: '#ff8800'
+                            });
+                        }
+                        
+                        if (gameState.boss.health <= 0) {
+                            gameState.score += 500; // Big boss kill bonus
+                            gameState.kills++;
+                            gameState.bossActive = false;
+                            
+                            // Play boss death sound
+                            playBossDeathSound();
+                            
+                            // Massive boss death explosion
+                            for (let k = 0; k < 50; k++) {
+                                gameState.particles.push({
+                                    x: gameState.boss.x,
+                                    y: gameState.boss.y,
+                                    dx: (Math.random() - 0.5) * 15,
+                                    dy: (Math.random() - 0.5) * 15,
+                                    life: 60,
+                                    color: k % 2 === 0 ? '#ff0000' : '#ffff00'
+                                });
+                            }
+                            
+                            // Boss drops special rewards
+                            for (let k = 0; k < 3; k++) {
+                                setTimeout(() => spawnPickup(), k * 300);
+                            }
+                            
+                            gameState.boss = null;
+                        }
+                        return;
+                    }
                 }
                 
                 // Check enemy hits
@@ -792,6 +937,46 @@
                         }
                     }
                 });
+            });
+            
+            // Update enemy bullets (boss shots)
+            gameState.enemyBullets.forEach((bullet, i) => {
+                bullet.x += bullet.dx;
+                bullet.y += bullet.dy;
+                bullet.life--;
+                
+                if (bullet.life <= 0 || 
+                    bullet.x < 0 || bullet.x > canvas.width || 
+                    bullet.y < 0 || bullet.y > canvas.height) {
+                    gameState.enemyBullets.splice(i, 1);
+                    return;
+                }
+                
+                // Check player hits
+                const dist = Math.sqrt((bullet.x - gameState.player.x) ** 2 + (bullet.y - gameState.player.y) ** 2);
+                if (dist < 20) {
+                    gameState.player.health -= 30; // Boss bullets do more damage
+                    gameState.enemyBullets.splice(i, 1);
+                    
+                    // Play damage sound
+                    playDamageSound();
+                    
+                    // Player hit particles
+                    for (let k = 0; k < 10; k++) {
+                        gameState.particles.push({
+                            x: gameState.player.x,
+                            y: gameState.player.y,
+                            dx: (Math.random() - 0.5) * 8,
+                            dy: (Math.random() - 0.5) * 8,
+                            life: 25,
+                            color: '#ff0000'
+                        });
+                    }
+                    
+                    if (gameState.player.health <= 0) {
+                        endGame();
+                    }
+                }
             });
         }
         
@@ -847,7 +1032,8 @@
         }
         
         function checkWaveComplete() {
-            if (gameState.enemies.length === 0 && !gameState.waveTransition) {
+            // Check if wave is complete (no enemies and no boss)
+            if (gameState.enemies.length === 0 && !gameState.bossActive && !gameState.waveTransition) {
                 gameState.waveTransition = true;
                 gameState.wave++;
                 gameState.score += gameState.wave * 50; // Reduced wave bonus
@@ -1026,6 +1212,50 @@
                 ctx.restore();
             }
             
+            // Draw boss if active
+            if (gameState.bossActive && gameState.boss) {
+                const boss = gameState.boss;
+                ctx.save();
+                ctx.translate(boss.x, boss.y);
+                ctx.rotate(boss.angle);
+                
+                // Boss body - much larger and different color
+                ctx.fillStyle = '#cc0044'; // Dark red
+                ctx.fillRect(-boss.size/2, -boss.size/3, boss.size, boss.size*2/3);
+                
+                // Boss armor plating
+                ctx.fillStyle = '#666666';
+                ctx.fillRect(-boss.size/2 + 5, -boss.size/3 + 5, boss.size - 10, boss.size*2/3 - 10);
+                
+                // Boss weapons
+                ctx.fillStyle = '#333333';
+                ctx.fillRect(boss.size/2, -5, 25, 10); // Main gun
+                ctx.fillRect(boss.size/2, -15, 15, 8);  // Secondary gun
+                ctx.fillRect(boss.size/2, 7, 15, 8);    // Secondary gun
+                
+                // Boss health bar - much larger
+                ctx.fillStyle = '#ff0000';
+                ctx.fillRect(-boss.size/2, -boss.size/2 - 15, boss.size, 8);
+                ctx.fillStyle = '#00ff00';
+                ctx.fillRect(-boss.size/2, -boss.size/2 - 15, (boss.health / boss.maxHealth) * boss.size, 8);
+                
+                // Boss glow effect
+                ctx.shadowColor = '#ff0044';
+                ctx.shadowBlur = 15;
+                ctx.strokeStyle = '#ff0044';
+                ctx.lineWidth = 3;
+                ctx.strokeRect(-boss.size/2, -boss.size/3, boss.size, boss.size*2/3);
+                ctx.shadowBlur = 0;
+                
+                ctx.restore();
+                
+                // Boss health text above health bar
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '14px Courier New';
+                ctx.textAlign = 'center';
+                ctx.fillText('BOSS', boss.x, boss.y - boss.size/2 - 25);
+            }
+            
             // Draw enemies
             gameState.enemies.forEach((enemy, index) => {
                 ctx.save();
@@ -1060,6 +1290,18 @@
             gameState.bullets.forEach(bullet => {
                 ctx.fillStyle = '#ffff00';
                 ctx.fillRect(bullet.x - 2, bullet.y - 2, 4, 4);
+            });
+            
+            // Draw enemy bullets (boss shots)
+            gameState.enemyBullets.forEach(bullet => {
+                ctx.fillStyle = '#ff0044';
+                ctx.fillRect(bullet.x - 3, bullet.y - 3, 6, 6);
+                
+                // Add glow effect to boss bullets
+                ctx.shadowColor = '#ff0044';
+                ctx.shadowBlur = 8;
+                ctx.fillRect(bullet.x - 2, bullet.y - 2, 4, 4);
+                ctx.shadowBlur = 0;
             });
         }
         
@@ -1161,6 +1403,7 @@
                 player: { x: 400, y: 300, health: 100, angle: 0 },
                 enemies: [],
                 bullets: [],
+                enemyBullets: [], // Reset boss bullets
                 pickups: [],
                 particles: [],
                 score: 0,
@@ -1184,11 +1427,127 @@
                 },
                 beamEffect: null,
                 frozenEnemies: new Set(),
-                nukeEffect: null
+                nukeEffect: null,
+                boss: null, // Reset boss
+                bossActive: false // Reset boss state
             };
             
             document.getElementById('gameOver').style.display = 'none';
             spawnWave();
+        }
+        
+        function updateBoss() {
+            if (!gameState.boss) return;
+            
+            const boss = gameState.boss;
+            const now = Date.now();
+            
+            // Boss AI behavior
+            if (now - boss.ai.lastDecision > 800) {
+                const distToPlayer = Math.sqrt(
+                    (gameState.player.x - boss.x) ** 2 + 
+                    (gameState.player.y - boss.y) ** 2
+                );
+                
+                if (distToPlayer > 300) {
+                    boss.ai.state = 'approach';
+                    boss.ai.targetX = gameState.player.x;
+                    boss.ai.targetY = gameState.player.y;
+                } else if (distToPlayer < 150) {
+                    boss.ai.state = 'retreat';
+                    boss.ai.targetX = boss.x + (boss.x - gameState.player.x);
+                    boss.ai.targetY = boss.y + (boss.y - gameState.player.y);
+                } else {
+                    boss.ai.state = 'circle';
+                    boss.ai.circleAngle += 0.3;
+                    boss.ai.targetX = gameState.player.x + Math.cos(boss.ai.circleAngle) * 200;
+                    boss.ai.targetY = gameState.player.y + Math.sin(boss.ai.circleAngle) * 200;
+                }
+                boss.ai.lastDecision = now;
+            }
+            
+            // Move boss
+            const dx = boss.ai.targetX - boss.x;
+            const dy = boss.ai.targetY - boss.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            
+            if (dist > 10) {
+                boss.x += (dx / dist) * boss.speed;
+                boss.y += (dy / dist) * boss.speed;
+            }
+            
+            // Keep boss on screen
+            boss.x = Math.max(boss.size/2, Math.min(canvas.width - boss.size/2, boss.x));
+            boss.y = Math.max(boss.size/2, Math.min(canvas.height - boss.size/2, boss.y));
+            
+            // Boss aims at player
+            const playerDx = gameState.player.x - boss.x;
+            const playerDy = gameState.player.y - boss.y;
+            boss.angle = Math.atan2(playerDy, playerDx);
+            
+            // Boss shooting patterns
+            if (now - boss.lastShot > 1200) { // Shoots every 1.2 seconds
+                bossShoot();
+                boss.lastShot = now;
+                boss.shotPattern = (boss.shotPattern + 1) % 3;
+            }
+        }
+        
+        function bossShoot() {
+            const boss = gameState.boss;
+            if (!boss) return;
+            
+            playBossShootSound();
+            
+            // Different shooting patterns based on boss phase
+            if (boss.shotPattern === 0) {
+                // Single aimed shot
+                const angle = Math.atan2(gameState.player.y - boss.y, gameState.player.x - boss.x);
+                gameState.enemyBullets.push({
+                    x: boss.x + Math.cos(angle) * boss.size/2,
+                    y: boss.y + Math.sin(angle) * boss.size/2,
+                    dx: Math.cos(angle) * 6,
+                    dy: Math.sin(angle) * 6,
+                    life: 120
+                });
+            } else if (boss.shotPattern === 1) {
+                // Triple shot spread
+                const baseAngle = Math.atan2(gameState.player.y - boss.y, gameState.player.x - boss.x);
+                for (let i = -1; i <= 1; i++) {
+                    const angle = baseAngle + i * 0.3;
+                    gameState.enemyBullets.push({
+                        x: boss.x + Math.cos(angle) * boss.size/2,
+                        y: boss.y + Math.sin(angle) * boss.size/2,
+                        dx: Math.cos(angle) * 5,
+                        dy: Math.sin(angle) * 5,
+                        life: 120
+                    });
+                }
+            } else {
+                // Circular burst (8 directions)
+                for (let i = 0; i < 8; i++) {
+                    const angle = (i / 8) * Math.PI * 2;
+                    gameState.enemyBullets.push({
+                        x: boss.x + Math.cos(angle) * boss.size/2,
+                        y: boss.y + Math.sin(angle) * boss.size/2,
+                        dx: Math.cos(angle) * 4,
+                        dy: Math.sin(angle) * 4,
+                        life: 100
+                    });
+                }
+            }
+            
+            // Muzzle flash particles
+            for (let i = 0; i < 8; i++) {
+                gameState.particles.push({
+                    x: boss.x,
+                    y: boss.y,
+                    dx: (Math.random() - 0.5) * 6,
+                    dy: (Math.random() - 0.5) * 6,
+                    life: 15,
+                    color: '#ff8800'
+                });
+            }
         }
         
         function gameLoop() {
