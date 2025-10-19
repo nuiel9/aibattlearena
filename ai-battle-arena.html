@@ -97,11 +97,14 @@
         <div>🔫 Ammo: <span id="ammo">30</span></div>
         <div>🤖 Wave: <span id="wave">1</span></div>
         <div>🏆 Kills: <span id="kills">0</span></div>
+        <div>⚡ Beam (Q): <span id="beam">Ready</span></div>
+        <div>❄️ Freeze (E): <span id="freeze">Ready</span></div>
     </div>
     
     <div id="instructions">
         <h3>🎮 AI BATTLE ARENA</h3>
         <p><strong>WASD</strong>: Move • <strong>Mouse</strong>: Aim • <strong>Click</strong>: Shoot • <strong>R</strong>: Reload • <strong>M</strong>: Toggle Sound</p>
+        <p><strong>Q</strong>: Beam Attack (8s cooldown) • <strong>E</strong>: Freeze Enemies (12s cooldown)</p>
         <p>🤖 Smart AI enemies hunt you • 💥 Shoot them before they get you!</p>
         <p>🎁 Collect ammo and health packs • 📈 Survive endless waves!</p>
     </div>
@@ -213,6 +216,29 @@
             setTimeout(() => playAmbientDrone(), 1800);
         }
         
+        function playBeamSound() {
+            if (!soundEnabled) return;
+            // Powerful beam sound
+            playSound(150, 2, 'sawtooth', 0.15);
+            setTimeout(() => playSound(200, 1.8, 'square', 0.1), 100);
+            setTimeout(() => playSound(300, 1.6, 'sine', 0.08), 200);
+        }
+        
+        function playFreezeSound() {
+            if (!soundEnabled) return;
+            // Ice freeze sound
+            playSound(400, 0.3, 'sine', 0.1);
+            setTimeout(() => playSound(300, 0.4, 'sine', 0.08), 200);
+            setTimeout(() => playSound(200, 0.5, 'triangle', 0.06), 400);
+        }
+        
+        function playAbilityCooldownSound() {
+            if (!soundEnabled) return;
+            // Ability ready sound
+            playSound(600, 0.2, 'sine', 0.05);
+            setTimeout(() => playSound(800, 0.1, 'sine', 0.03), 150);
+        }
+        
         // Game state
         let canvas, ctx;
         let gameState = {
@@ -233,7 +259,14 @@
             lastShot: 0,
             waveTimer: 0,
             waveTransition: false,
-            lastSurvivalPoint: Date.now()
+            lastSurvivalPoint: Date.now(),
+            // Special abilities
+            abilities: {
+                beam: { cooldown: 0, maxCooldown: 8000, duration: 0, active: false },
+                freeze: { cooldown: 0, maxCooldown: 12000, duration: 0, active: false }
+            },
+            beamEffect: null,
+            frozenEnemies: new Set()
         };
         
         // Initialize game
@@ -260,6 +293,8 @@
                     soundEnabled = !soundEnabled;
                     console.log('Sound', soundEnabled ? 'enabled' : 'disabled');
                 }
+                if (e.code === 'KeyQ') activateBeam();
+                if (e.code === 'KeyE') activateFreeze();
                 
                 // Resume audio context on first user interaction
                 if (audioContext && audioContext.state === 'suspended') {
@@ -397,6 +432,111 @@
             }, 1500);
         }
         
+        function activateBeam() {
+            if (gameState.abilities.beam.cooldown > 0 || !gameState.gameRunning) return;
+            
+            gameState.abilities.beam.active = true;
+            gameState.abilities.beam.duration = 2000; // 2 seconds
+            gameState.abilities.beam.cooldown = gameState.abilities.beam.maxCooldown;
+            
+            // Play beam sound
+            playBeamSound();
+            
+            // Create beam effect
+            gameState.beamEffect = {
+                startX: gameState.player.x,
+                startY: gameState.player.y,
+                angle: gameState.player.angle,
+                width: 40,
+                length: Math.max(canvas.width, canvas.height)
+            };
+            
+            // Damage all enemies in beam path
+            damageEnemiesInBeam();
+        }
+        
+        function activateFreeze() {
+            if (gameState.abilities.freeze.cooldown > 0 || !gameState.gameRunning) return;
+            
+            gameState.abilities.freeze.active = true;
+            gameState.abilities.freeze.duration = 4000; // 4 seconds
+            gameState.abilities.freeze.cooldown = gameState.abilities.freeze.maxCooldown;
+            
+            // Play freeze sound
+            playFreezeSound();
+            
+            // Freeze all enemies
+            gameState.enemies.forEach((enemy, index) => {
+                gameState.frozenEnemies.add(index);
+            });
+            
+            // Add freeze particles
+            for (let i = 0; i < 50; i++) {
+                gameState.particles.push({
+                    x: Math.random() * canvas.width,
+                    y: Math.random() * canvas.height,
+                    dx: (Math.random() - 0.5) * 2,
+                    dy: (Math.random() - 0.5) * 2,
+                    life: 60,
+                    color: '#00ffff'
+                });
+            }
+        }
+        
+        function damageEnemiesInBeam() {
+            const beam = gameState.beamEffect;
+            if (!beam) return;
+            
+            gameState.enemies.forEach((enemy, index) => {
+                // Calculate if enemy is in beam path
+                const dx = enemy.x - beam.startX;
+                const dy = enemy.y - beam.startY;
+                const distance = Math.sqrt(dx*dx + dy*dy);
+                
+                if (distance > beam.length) return;
+                
+                // Check angle alignment
+                const enemyAngle = Math.atan2(dy, dx);
+                const angleDiff = Math.abs(enemyAngle - beam.angle);
+                const normalizedDiff = Math.min(angleDiff, Math.PI*2 - angleDiff);
+                
+                if (normalizedDiff <= beam.width / 200) { // Hit detection
+                    enemy.health -= 100; // Massive beam damage
+                    
+                    // Beam hit particles
+                    for (let i = 0; i < 8; i++) {
+                        gameState.particles.push({
+                            x: enemy.x,
+                            y: enemy.y,
+                            dx: (Math.random() - 0.5) * 6,
+                            dy: (Math.random() - 0.5) * 6,
+                            life: 25,
+                            color: '#ffff00'
+                        });
+                    }
+                    
+                    if (enemy.health <= 0) {
+                        gameState.score += 50; // Bonus for beam kill
+                        gameState.kills++;
+                        gameState.enemies.splice(index, 1);
+                        playEnemyDeathSound();
+                        
+                        // Death explosion
+                        for (let i = 0; i < 15; i++) {
+                            gameState.particles.push({
+                                x: enemy.x,
+                                y: enemy.y,
+                                dx: (Math.random() - 0.5) * 10,
+                                dy: (Math.random() - 0.5) * 10,
+                                life: 40,
+                                color: '#ff4400'
+                            });
+                        }
+                    }
+                }
+            });
+        }
+        
         function updatePlayer() {
             const speed = 4;
             
@@ -417,6 +557,12 @@
         
         function updateEnemies() {
             gameState.enemies.forEach((enemy, i) => {
+                // Check if enemy is frozen
+                if (gameState.frozenEnemies.has(i)) {
+                    // Frozen enemies don't move or attack
+                    return;
+                }
+                
                 // Smart AI behavior
                 const now = Date.now();
                 if (now - enemy.ai.lastDecision > 500) {
@@ -676,15 +822,50 @@
             
             ctx.restore();
             
+            // Draw beam effect
+            if (gameState.beamEffect && gameState.abilities.beam.active) {
+                const beam = gameState.beamEffect;
+                ctx.save();
+                ctx.translate(beam.startX, beam.startY);
+                ctx.rotate(beam.angle);
+                
+                // Beam core
+                const gradient = ctx.createLinearGradient(0, -beam.width/2, 0, beam.width/2);
+                gradient.addColorStop(0, 'rgba(255, 255, 0, 0)');
+                gradient.addColorStop(0.5, 'rgba(255, 255, 0, 0.8)');
+                gradient.addColorStop(1, 'rgba(255, 255, 0, 0)');
+                
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, -beam.width/2, beam.length, beam.width);
+                
+                // Beam outline
+                ctx.strokeStyle = '#ffff00';
+                ctx.lineWidth = 3;
+                ctx.strokeRect(0, -beam.width/2, beam.length, beam.width);
+                
+                ctx.restore();
+            }
+            
             // Draw enemies
-            gameState.enemies.forEach(enemy => {
+            gameState.enemies.forEach((enemy, index) => {
                 ctx.save();
                 ctx.translate(enemy.x, enemy.y);
                 ctx.rotate(enemy.angle);
                 
-                // Enemy body
-                ctx.fillStyle = enemy.type === 'fast' ? '#ff6600' : '#ff0000';
+                // Enemy body - change color if frozen
+                if (gameState.frozenEnemies.has(index)) {
+                    ctx.fillStyle = '#4444ff'; // Frozen blue
+                } else {
+                    ctx.fillStyle = enemy.type === 'fast' ? '#ff6600' : '#ff0000';
+                }
                 ctx.fillRect(-20, -15, 40, 30);
+                
+                // Frozen effect
+                if (gameState.frozenEnemies.has(index)) {
+                    ctx.strokeStyle = '#00ffff';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(-20, -15, 40, 30);
+                }
                 
                 // Health bar
                 ctx.fillStyle = '#ff0000';
@@ -702,12 +883,60 @@
             });
         }
         
+        function updateAbilities() {
+            const now = Date.now();
+            
+            // Update beam ability
+            if (gameState.abilities.beam.active) {
+                gameState.abilities.beam.duration -= 16; // ~60fps
+                if (gameState.abilities.beam.duration <= 0) {
+                    gameState.abilities.beam.active = false;
+                    gameState.beamEffect = null;
+                }
+            }
+            
+            if (gameState.abilities.beam.cooldown > 0) {
+                gameState.abilities.beam.cooldown -= 16;
+                if (gameState.abilities.beam.cooldown <= 0) {
+                    playAbilityCooldownSound();
+                }
+            }
+            
+            // Update freeze ability
+            if (gameState.abilities.freeze.active) {
+                gameState.abilities.freeze.duration -= 16;
+                if (gameState.abilities.freeze.duration <= 0) {
+                    gameState.abilities.freeze.active = false;
+                    gameState.frozenEnemies.clear();
+                }
+            }
+            
+            if (gameState.abilities.freeze.cooldown > 0) {
+                gameState.abilities.freeze.cooldown -= 16;
+                if (gameState.abilities.freeze.cooldown <= 0) {
+                    playAbilityCooldownSound();
+                }
+            }
+        }
+        
         function updateUI() {
             document.getElementById('score').textContent = gameState.score;
             document.getElementById('health').textContent = Math.max(0, gameState.player.health);
             document.getElementById('ammo').textContent = gameState.reloading ? 'RELOADING...' : gameState.ammo;
             document.getElementById('wave').textContent = gameState.wave;
             document.getElementById('kills').textContent = gameState.kills;
+            
+            // Update ability display
+            const beamCooldown = Math.max(0, Math.ceil(gameState.abilities.beam.cooldown / 1000));
+            const freezeCooldown = Math.max(0, Math.ceil(gameState.abilities.freeze.cooldown / 1000));
+            
+            document.getElementById('beam').textContent = 
+                gameState.abilities.beam.active ? 'ACTIVE!' : 
+                beamCooldown > 0 ? `${beamCooldown}s` : 'Ready';
+                
+            document.getElementById('freeze').textContent = 
+                gameState.abilities.freeze.active ? 'ACTIVE!' : 
+                freezeCooldown > 0 ? `${freezeCooldown}s` : 'Ready';
             
             // Add survival points much slower - only every 60 frames (1 second)
             if (Date.now() - gameState.lastSurvivalPoint > 1000) {
@@ -747,7 +976,14 @@
                 lastShot: 0,
                 waveTimer: 0,
                 waveTransition: false,
-                lastSurvivalPoint: Date.now()
+                lastSurvivalPoint: Date.now(),
+                // Special abilities
+                abilities: {
+                    beam: { cooldown: 0, maxCooldown: 8000, duration: 0, active: false },
+                    freeze: { cooldown: 0, maxCooldown: 12000, duration: 0, active: false }
+                },
+                beamEffect: null,
+                frozenEnemies: new Set()
             };
             
             document.getElementById('gameOver').style.display = 'none';
@@ -761,6 +997,7 @@
                 updateBullets();
                 updatePickups();
                 updateParticles();
+                updateAbilities();
                 checkWaveComplete();
                 updateUI();
             }
