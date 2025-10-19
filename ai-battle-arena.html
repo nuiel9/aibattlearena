@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Battle Arena - Game Jam Edition</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: radial-gradient(circle, #2c1810, #0a0a0a);
+            font-family: 'Courier New', monospace;
+            color: #00ff00;
+            overflow: hidden;
+            cursor: crosshair;
+        }
+        
+        #gameCanvas {
+            display: block;
+            border: 2px solid #00ff00;
+        }
+        
+        #ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 100;
+            font-size: 20px;
+            text-shadow: 0 0 10px #00ff00;
+        }
+        
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 20px;
+            height: 20px;
+            border: 2px solid #ff0000;
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 50;
+        }
+        
+        #instructions {
+            position: absolute;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            text-align: center;
+            background: rgba(0,0,0,0.8);
+            padding: 15px;
+            border: 1px solid #00ff00;
+            border-radius: 10px;
+        }
+        
+        #gameOver {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 200;
+            text-align: center;
+            background: rgba(0,0,0,0.9);
+            padding: 30px;
+            border: 2px solid #ff0000;
+            border-radius: 15px;
+            display: none;
+        }
+        
+        button {
+            background: #00ff00;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            font-family: 'Courier New', monospace;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 10px;
+            transition: all 0.2s;
+        }
+        
+        button:hover {
+            background: #00cc00;
+            box-shadow: 0 0 10px #00ff00;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <div id="crosshair"></div>
+    
+    <div id="ui">
+        <div>🎯 Score: <span id="score">0</span></div>
+        <div>❤️ Health: <span id="health">100</span></div>
+        <div>🔫 Ammo: <span id="ammo">30</span></div>
+        <div>🤖 Wave: <span id="wave">1</span></div>
+        <div>🏆 Kills: <span id="kills">0</span></div>
+    </div>
+    
+    <div id="instructions">
+        <h3>🎮 AI BATTLE ARENA</h3>
+        <p><strong>WASD</strong>: Move • <strong>Mouse</strong>: Aim • <strong>Click</strong>: Shoot • <strong>R</strong>: Reload</p>
+        <p>🤖 Smart AI enemies hunt you • 💥 Shoot them before they get you!</p>
+        <p>🎁 Collect ammo and health packs • 📈 Survive endless waves!</p>
+    </div>
+    
+    <div id="gameOver">
+        <h2>💀 GAME OVER 💀</h2>
+        <p>Final Score: <span id="finalScore">0</span></p>
+        <p>Waves Survived: <span id="finalWave">0</span></p>
+        <p>Total Kills: <span id="finalKills">0</span></p>
+        <button onclick="restartGame()">🔄 PLAY AGAIN</button>
+    </div>
+
+    <script>
+        // Game state
+        let canvas, ctx;
+        let gameState = {
+            player: { x: 400, y: 300, health: 100, angle: 0 },
+            enemies: [],
+            bullets: [],
+            pickups: [],
+            particles: [],
+            score: 0,
+            wave: 1,
+            kills: 0,
+            ammo: 30,
+            maxAmmo: 30,
+            reloading: false,
+            keys: {},
+            mouse: { x: 0, y: 0, down: false },
+            gameRunning: true,
+            lastShot: 0,
+            waveTimer: 0
+        };
+        
+        // Initialize game
+        function init() {
+            canvas = document.getElementById('gameCanvas');
+            ctx = canvas.getContext('2d');
+            canvas.width = window.innerWidth - 4;
+            canvas.height = window.innerHeight - 4;
+            
+            setupControls();
+            spawnWave();
+            gameLoop();
+        }
+        
+        function setupControls() {
+            document.addEventListener('keydown', (e) => {
+                gameState.keys[e.code] = true;
+                if (e.code === 'KeyR') reload();
+            });
+            
+            document.addEventListener('keyup', (e) => {
+                gameState.keys[e.code] = false;
+            });
+            
+            canvas.addEventListener('mousemove', (e) => {
+                const rect = canvas.getBoundingClientRect();
+                gameState.mouse.x = e.clientX - rect.left;
+                gameState.mouse.y = e.clientY - rect.top;
+            });
+            
+            canvas.addEventListener('mousedown', () => {
+                gameState.mouse.down = true;
+                shoot();
+            });
+            
+            canvas.addEventListener('mouseup', () => {
+                gameState.mouse.down = false;
+            });
+        }
+        
+        function spawnWave() {
+            const enemyCount = 3 + gameState.wave * 2;
+            for (let i = 0; i < enemyCount; i++) {
+                setTimeout(() => spawnEnemy(), i * 1000);
+            }
+            
+            // Spawn pickups
+            if (Math.random() < 0.7) {
+                spawnPickup();
+            }
+        }
+        
+        function spawnEnemy() {
+            const side = Math.floor(Math.random() * 4);
+            let x, y;
+            
+            switch(side) {
+                case 0: x = Math.random() * canvas.width; y = -50; break;
+                case 1: x = canvas.width + 50; y = Math.random() * canvas.height; break;
+                case 2: x = Math.random() * canvas.width; y = canvas.height + 50; break;
+                case 3: x = -50; y = Math.random() * canvas.height; break;
+            }
+            
+            gameState.enemies.push({
+                x, y,
+                health: 20 + gameState.wave * 5,
+                maxHealth: 20 + gameState.wave * 5,
+                speed: 1 + gameState.wave * 0.3,
+                type: Math.random() < 0.3 ? 'fast' : 'normal',
+                lastAttack: 0,
+                angle: 0,
+                ai: {
+                    state: 'hunt',
+                    lastDecision: 0,
+                    targetX: gameState.player.x,
+                    targetY: gameState.player.y
+                }
+            });
+        }
+        
+        function spawnPickup() {
+            const type = Math.random() < 0.6 ? 'ammo' : 'health';
+            gameState.pickups.push({
+                x: 100 + Math.random() * (canvas.width - 200),
+                y: 100 + Math.random() * (canvas.height - 200),
+                type,
+                rotation: 0,
+                pulse: 0
+            });
+        }
+        
+        function shoot() {
+            if (!gameState.gameRunning || gameState.reloading) return;
+            if (gameState.ammo <= 0) {
+                reload();
+                return;
+            }
+            if (Date.now() - gameState.lastShot < 150) return;
+            
+            const dx = gameState.mouse.x - gameState.player.x;
+            const dy = gameState.mouse.y - gameState.player.y;
+            const angle = Math.atan2(dy, dx);
+            
+            gameState.bullets.push({
+                x: gameState.player.x,
+                y: gameState.player.y,
+                dx: Math.cos(angle) * 8,
+                dy: Math.sin(angle) * 8,
+                life: 100
+            });
+            
+            gameState.ammo--;
+            gameState.lastShot = Date.now();
+            
+            // Muzzle flash
+            for (let i = 0; i < 5; i++) {
+                gameState.particles.push({
+                    x: gameState.player.x,
+                    y: gameState.player.y,
+                    dx: (Math.random() - 0.5) * 4,
+                    dy: (Math.random() - 0.5) * 4,
+                    life: 10,
+                    color: '#ffff00'
+                });
+            }
+        }
+        
+        function reload() {
+            if (gameState.reloading || gameState.ammo === gameState.maxAmmo) return;
+            gameState.reloading = true;
+            setTimeout(() => {
+                gameState.ammo = gameState.maxAmmo;
+                gameState.reloading = false;
+            }, 1500);
+        }
+        
+        function updatePlayer() {
+            const speed = 4;
+            
+            if (gameState.keys['KeyW']) gameState.player.y -= speed;
+            if (gameState.keys['KeyS']) gameState.player.y += speed;
+            if (gameState.keys['KeyA']) gameState.player.x -= speed;
+            if (gameState.keys['KeyD']) gameState.player.x += speed;
+            
+            // Keep in bounds
+            gameState.player.x = Math.max(20, Math.min(canvas.width - 20, gameState.player.x));
+            gameState.player.y = Math.max(20, Math.min(canvas.height - 20, gameState.player.y));
+            
+            // Player angle
+            const dx = gameState.mouse.x - gameState.player.x;
+            const dy = gameState.mouse.y - gameState.player.y;
+            gameState.player.angle = Math.atan2(dy, dx);
+        }
+        
+        function updateEnemies() {
+            gameState.enemies.forEach((enemy, i) => {
+                // Smart AI behavior
+                const now = Date.now();
+                if (now - enemy.ai.lastDecision > 500) {
+                    const distToPlayer = Math.sqrt(
+                        (gameState.player.x - enemy.x) ** 2 + 
+                        (gameState.player.y - enemy.y) ** 2
+                    );
+                    
+                    if (distToPlayer < 100) {
+                        enemy.ai.state = 'attack';
+                    } else if (distToPlayer > 300) {
+                        enemy.ai.state = 'hunt';
+                        enemy.ai.targetX = gameState.player.x;
+                        enemy.ai.targetY = gameState.player.y;
+                    } else {
+                        enemy.ai.state = Math.random() < 0.7 ? 'hunt' : 'flank';
+                        if (enemy.ai.state === 'flank') {
+                            enemy.ai.targetX = gameState.player.x + (Math.random() - 0.5) * 200;
+                            enemy.ai.targetY = gameState.player.y + (Math.random() - 0.5) * 200;
+                        }
+                    }
+                    enemy.ai.lastDecision = now;
+                }
+                
+                // Move based on AI state
+                let targetX, targetY;
+                if (enemy.ai.state === 'attack') {
+                    targetX = gameState.player.x;
+                    targetY = gameState.player.y;
+                } else {
+                    targetX = enemy.ai.targetX;
+                    targetY = enemy.ai.targetY;
+                }
+                
+                const dx = targetX - enemy.x;
+                const dy = targetY - enemy.y;
+                const dist = Math.sqrt(dx*dx + dy*dy);
+                
+                if (dist > 5) {
+                    let speed = enemy.speed;
+                    if (enemy.type === 'fast') speed *= 1.5;
+                    
+                    enemy.x += (dx / dist) * speed;
+                    enemy.y += (dy / dist) * speed;
+                }
+                
+                enemy.angle = Math.atan2(gameState.player.y - enemy.y, gameState.player.x - enemy.x);
+                
+                // Attack player
+                const playerDist = Math.sqrt(
+                    (gameState.player.x - enemy.x) ** 2 + 
+                    (gameState.player.y - enemy.y) ** 2
+                );
+                
+                if (playerDist < 40 && now - enemy.lastAttack > 1000) {
+                    gameState.player.health -= enemy.type === 'fast' ? 15 : 10;
+                    enemy.lastAttack = now;
+                    
+                    // Damage particles
+                    for (let j = 0; j < 8; j++) {
+                        gameState.particles.push({
+                            x: gameState.player.x,
+                            y: gameState.player.y,
+                            dx: (Math.random() - 0.5) * 6,
+                            dy: (Math.random() - 0.5) * 6,
+                            life: 20,
+                            color: '#ff0000'
+                        });
+                    }
+                    
+                    if (gameState.player.health <= 0) {
+                        endGame();
+                    }
+                }
+            });
+        }
+        
+        function updateBullets() {
+            gameState.bullets.forEach((bullet, i) => {
+                bullet.x += bullet.dx;
+                bullet.y += bullet.dy;
+                bullet.life--;
+                
+                if (bullet.life <= 0 || 
+                    bullet.x < 0 || bullet.x > canvas.width || 
+                    bullet.y < 0 || bullet.y > canvas.height) {
+                    gameState.bullets.splice(i, 1);
+                    return;
+                }
+                
+                // Check enemy hits
+                gameState.enemies.forEach((enemy, j) => {
+                    const dist = Math.sqrt((bullet.x - enemy.x) ** 2 + (bullet.y - enemy.y) ** 2);
+                    if (dist < 25) {
+                        enemy.health -= 25;
+                        gameState.bullets.splice(i, 1);
+                        
+                        // Hit particles
+                        for (let k = 0; k < 6; k++) {
+                            gameState.particles.push({
+                                x: enemy.x,
+                                y: enemy.y,
+                                dx: (Math.random() - 0.5) * 4,
+                                dy: (Math.random() - 0.5) * 4,
+                                life: 15,
+                                color: '#ff8800'
+                            });
+                        }
+                        
+                        if (enemy.health <= 0) {
+                            gameState.score += 100;
+                            gameState.kills++;
+                            gameState.enemies.splice(j, 1);
+                            
+                            // Death explosion
+                            for (let k = 0; k < 12; k++) {
+                                gameState.particles.push({
+                                    x: enemy.x,
+                                    y: enemy.y,
+                                    dx: (Math.random() - 0.5) * 8,
+                                    dy: (Math.random() - 0.5) * 8,
+                                    life: 30,
+                                    color: '#ff0000'
+                                });
+                            }
+                        }
+                    }
+                });
+            });
+        }
+        
+        function updatePickups() {
+            gameState.pickups.forEach((pickup, i) => {
+                pickup.rotation += 0.1;
+                pickup.pulse += 0.2;
+                
+                const dist = Math.sqrt(
+                    (gameState.player.x - pickup.x) ** 2 + 
+                    (gameState.player.y - pickup.y) ** 2
+                );
+                
+                if (dist < 30) {
+                    if (pickup.type === 'ammo') {
+                        gameState.maxAmmo += 10;
+                        gameState.ammo = gameState.maxAmmo;
+                    } else {
+                        gameState.player.health = Math.min(100, gameState.player.health + 30);
+                    }
+                    
+                    gameState.pickups.splice(i, 1);
+                    gameState.score += 50;
+                }
+            });
+        }
+        
+        function updateParticles() {
+            gameState.particles.forEach((particle, i) => {
+                particle.x += particle.dx;
+                particle.y += particle.dy;
+                particle.life--;
+                particle.dx *= 0.95;
+                particle.dy *= 0.95;
+                
+                if (particle.life <= 0) {
+                    gameState.particles.splice(i, 1);
+                }
+            });
+        }
+        
+        function checkWaveComplete() {
+            if (gameState.enemies.length === 0) {
+                gameState.wave++;
+                gameState.score += gameState.wave * 100;
+                setTimeout(() => spawnWave(), 2000);
+            }
+        }
+        
+        function render() {
+            // Clear screen
+            ctx.fillStyle = '#001100';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Grid pattern
+            ctx.strokeStyle = '#002200';
+            ctx.lineWidth = 1;
+            for (let i = 0; i < canvas.width; i += 50) {
+                ctx.beginPath();
+                ctx.moveTo(i, 0);
+                ctx.lineTo(i, canvas.height);
+                ctx.stroke();
+            }
+            for (let i = 0; i < canvas.height; i += 50) {
+                ctx.beginPath();
+                ctx.moveTo(0, i);
+                ctx.lineTo(canvas.width, i);
+                ctx.stroke();
+            }
+            
+            // Draw particles
+            gameState.particles.forEach(particle => {
+                ctx.fillStyle = particle.color;
+                ctx.globalAlpha = particle.life / 30;
+                ctx.fillRect(particle.x - 2, particle.y - 2, 4, 4);
+                ctx.globalAlpha = 1;
+            });
+            
+            // Draw pickups
+            gameState.pickups.forEach(pickup => {
+                ctx.save();
+                ctx.translate(pickup.x, pickup.y);
+                ctx.rotate(pickup.rotation);
+                
+                const size = 15 + Math.sin(pickup.pulse) * 3;
+                ctx.fillStyle = pickup.type === 'ammo' ? '#ffff00' : '#00ff00';
+                ctx.fillRect(-size/2, -size/2, size, size);
+                
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(-size/2, -size/2, size, size);
+                
+                ctx.restore();
+            });
+            
+            // Draw player
+            ctx.save();
+            ctx.translate(gameState.player.x, gameState.player.y);
+            ctx.rotate(gameState.player.angle);
+            
+            // Player body
+            ctx.fillStyle = '#00ff00';
+            ctx.fillRect(-15, -10, 30, 20);
+            
+            // Player gun
+            ctx.fillStyle = '#888888';
+            ctx.fillRect(15, -2, 20, 4);
+            
+            ctx.restore();
+            
+            // Draw enemies
+            gameState.enemies.forEach(enemy => {
+                ctx.save();
+                ctx.translate(enemy.x, enemy.y);
+                ctx.rotate(enemy.angle);
+                
+                // Enemy body
+                ctx.fillStyle = enemy.type === 'fast' ? '#ff6600' : '#ff0000';
+                ctx.fillRect(-20, -15, 40, 30);
+                
+                // Health bar
+                ctx.fillStyle = '#ff0000';
+                ctx.fillRect(-20, -25, 40, 5);
+                ctx.fillStyle = '#00ff00';
+                ctx.fillRect(-20, -25, (enemy.health / enemy.maxHealth) * 40, 5);
+                
+                ctx.restore();
+            });
+            
+            // Draw bullets
+            gameState.bullets.forEach(bullet => {
+                ctx.fillStyle = '#ffff00';
+                ctx.fillRect(bullet.x - 2, bullet.y - 2, 4, 4);
+            });
+        }
+        
+        function updateUI() {
+            document.getElementById('score').textContent = gameState.score;
+            document.getElementById('health').textContent = Math.max(0, gameState.player.health);
+            document.getElementById('ammo').textContent = gameState.reloading ? 'RELOADING...' : gameState.ammo;
+            document.getElementById('wave').textContent = gameState.wave;
+            document.getElementById('kills').textContent = gameState.kills;
+            
+            gameState.score += 1;
+        }
+        
+        function endGame() {
+            gameState.gameRunning = false;
+            document.getElementById('finalScore').textContent = gameState.score;
+            document.getElementById('finalWave').textContent = gameState.wave;
+            document.getElementById('finalKills').textContent = gameState.kills;
+            document.getElementById('gameOver').style.display = 'block';
+        }
+        
+        function restartGame() {
+            gameState = {
+                player: { x: 400, y: 300, health: 100, angle: 0 },
+                enemies: [],
+                bullets: [],
+                pickups: [],
+                particles: [],
+                score: 0,
+                wave: 1,
+                kills: 0,
+                ammo: 30,
+                maxAmmo: 30,
+                reloading: false,
+                keys: {},
+                mouse: { x: 0, y: 0, down: false },
+                gameRunning: true,
+                lastShot: 0,
+                waveTimer: 0
+            };
+            
+            document.getElementById('gameOver').style.display = 'none';
+            spawnWave();
+        }
+        
+        function gameLoop() {
+            if (gameState.gameRunning) {
+                updatePlayer();
+                updateEnemies();
+                updateBullets();
+                updatePickups();
+                updateParticles();
+                checkWaveComplete();
+                updateUI();
+            }
+            
+            render();
+            requestAnimationFrame(gameLoop);
+        }
+        
+        // Start the game
+        window.addEventListener('load', init);
+    </script>
+</body>
+</html>

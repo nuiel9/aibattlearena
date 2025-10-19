@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Hunter 3D - Simple Version</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #1e3c72, #2a5298);
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+            color: white;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 100;
+            font-size: 18px;
+        }
+        #instructions {
+            position: absolute;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 100;
+            text-align: center;
+            background: rgba(0,0,0,0.7);
+            padding: 15px;
+            border-radius: 10px;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+    <div id="info">
+        <div>Score: <span id="score">0</span></div>
+        <div>Health: <span id="health">100</span></div>
+    </div>
+    
+    <div id="instructions">
+        <h3>🎮 AI Hunter 3D - Simple Version</h3>
+        <p>WASD: Move • Mouse: Look • Space: Jump</p>
+        <p>Avoid red enemies • Collect blue gems • Survive!</p>
+    </div>
+
+    <script>
+        // Check if Three.js loaded
+        if (typeof THREE === 'undefined') {
+            document.body.innerHTML = `
+                <div style="display: flex; justify-content: center; align-items: center; height: 100vh; text-align: center;">
+                    <div>
+                        <h1>⚠️ Could not load Three.js</h1>
+                        <p>Please check your internet connection</p>
+                        <p>Or download the game files and run with a local server</p>
+                        <button onclick="location.reload()">Try Again</button>
+                    </div>
+                </div>
+            `;
+        } else {
+            // Game code here
+            let scene, camera, renderer;
+            let player, enemies = [], powerUps = [];
+            let gameState = {
+                score: 0,
+                health: 100,
+                keys: {}
+            };
+
+            function init() {
+                scene = new THREE.Scene();
+                scene.background = new THREE.Color(0x87CEEB);
+                
+                camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+                camera.position.set(0, 5, 10);
+                
+                renderer = new THREE.WebGLRenderer({ antialias: true });
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                document.body.appendChild(renderer.domElement);
+                
+                // Lighting
+                const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+                scene.add(ambientLight);
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                directionalLight.position.set(50, 50, 50);
+                scene.add(directionalLight);
+                
+                createWorld();
+                setupControls();
+                animate();
+            }
+
+            function createWorld() {
+                // Ground
+                const groundGeometry = new THREE.PlaneGeometry(50, 50);
+                const groundMaterial = new THREE.MeshLambertMaterial({ color: 0x90EE90 });
+                const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+                ground.rotation.x = -Math.PI / 2;
+                scene.add(ground);
+                
+                // Player
+                const playerGeometry = new THREE.CapsuleGeometry(0.5, 2);
+                const playerMaterial = new THREE.MeshLambertMaterial({ color: 0x00ff00 });
+                player = new THREE.Mesh(playerGeometry, playerMaterial);
+                player.position.set(0, 2, 0);
+                scene.add(player);
+                
+                // Create enemies
+                for (let i = 0; i < 3; i++) {
+                    const enemyGeometry = new THREE.ConeGeometry(0.8, 2);
+                    const enemyMaterial = new THREE.MeshLambertMaterial({ color: 0xff0000 });
+                    const enemy = new THREE.Mesh(enemyGeometry, enemyMaterial);
+                    enemy.position.set(
+                        Math.cos(i * 2) * 10,
+                        1,
+                        Math.sin(i * 2) * 10
+                    );
+                    enemy.userData = { speed: 0.03 + Math.random() * 0.02 };
+                    enemies.push(enemy);
+                    scene.add(enemy);
+                }
+                
+                // Create power-ups
+                for (let i = 0; i < 2; i++) {
+                    const powerUpGeometry = new THREE.OctahedronGeometry(0.6);
+                    const powerUpMaterial = new THREE.MeshLambertMaterial({ color: 0x00ffff });
+                    const powerUp = new THREE.Mesh(powerUpGeometry, powerUpMaterial);
+                    powerUp.position.set(
+                        (Math.random() - 0.5) * 20,
+                        2,
+                        (Math.random() - 0.5) * 20
+                    );
+                    powerUp.userData = { rotSpeed: 0.02 };
+                    powerUps.push(powerUp);
+                    scene.add(powerUp);
+                }
+            }
+
+            function setupControls() {
+                document.addEventListener('keydown', (event) => {
+                    gameState.keys[event.code] = true;
+                });
+                
+                document.addEventListener('keyup', (event) => {
+                    gameState.keys[event.code] = false;
+                });
+            }
+
+            function update() {
+                // Player movement
+                const moveSpeed = 0.2;
+                if (gameState.keys['KeyW']) player.position.z -= moveSpeed;
+                if (gameState.keys['KeyS']) player.position.z += moveSpeed;
+                if (gameState.keys['KeyA']) player.position.x -= moveSpeed;
+                if (gameState.keys['KeyD']) player.position.x += moveSpeed;
+                if (gameState.keys['Space'] && player.position.y <= 2.1) {
+                    player.position.y = 4;
+                }
+                
+                // Gravity
+                if (player.position.y > 2) {
+                    player.position.y -= 0.1;
+                } else {
+                    player.position.y = 2;
+                }
+                
+                // Keep player in bounds
+                const bound = 20;
+                player.position.x = Math.max(-bound, Math.min(bound, player.position.x));
+                player.position.z = Math.max(-bound, Math.min(bound, player.position.z));
+                
+                // Update camera
+                camera.position.copy(player.position);
+                camera.position.y += 3;
+                camera.position.z += 5;
+                camera.lookAt(player.position);
+                
+                // Update enemies (AI)
+                enemies.forEach(enemy => {
+                    const direction = new THREE.Vector3()
+                        .subVectors(player.position, enemy.position)
+                        .normalize();
+                    enemy.position.add(direction.multiplyScalar(enemy.userData.speed));
+                    enemy.lookAt(player.position);
+                    
+                    // Collision with player
+                    if (enemy.position.distanceTo(player.position) < 1.5) {
+                        gameState.health -= 1;
+                        if (gameState.health <= 0) {
+                            alert(`Game Over! Final Score: ${gameState.score}`);
+                            location.reload();
+                        }
+                    }
+                });
+                
+                // Update power-ups
+                powerUps.forEach((powerUp, index) => {
+                    powerUp.rotation.y += powerUp.userData.rotSpeed;
+                    
+                    if (powerUp.position.distanceTo(player.position) < 2) {
+                        gameState.score += 100;
+                        gameState.health = Math.min(100, gameState.health + 25);
+                        scene.remove(powerUp);
+                        powerUps.splice(index, 1);
+                        
+                        // Spawn new power-up
+                        setTimeout(() => {
+                            const newPowerUp = new THREE.Mesh(
+                                new THREE.OctahedronGeometry(0.6),
+                                new THREE.MeshLambertMaterial({ color: 0x00ffff })
+                            );
+                            newPowerUp.position.set(
+                                (Math.random() - 0.5) * 20,
+                                2,
+                                (Math.random() - 0.5) * 20
+                            );
+                            newPowerUp.userData = { rotSpeed: 0.02 };
+                            powerUps.push(newPowerUp);
+                            scene.add(newPowerUp);
+                        }, 2000);
+                    }
+                });
+                
+                // Update UI
+                document.getElementById('score').textContent = gameState.score;
+                document.getElementById('health').textContent = Math.max(0, gameState.health);
+                gameState.score += 1;
+            }
+
+            function animate() {
+                requestAnimationFrame(animate);
+                update();
+                renderer.render(scene, camera);
+            }
+
+            // Handle window resize
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+
+            // Start the game
+            init();
+        }
+    </script>
+</body>
+</html>

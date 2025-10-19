@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Hunter 3D - Offline Version</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #1e3c72, #2a5298);
+            font-family: Arial, sans-serif;
+            color: white;
+            overflow: hidden;
+        }
+        
+        #gameCanvas {
+            display: block;
+        }
+        
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+            font-size: 18px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+        }
+        
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            text-align: center;
+            background: rgba(0,0,0,0.8);
+            padding: 15px;
+            border-radius: 10px;
+            z-index: 100;
+        }
+        
+        #debug {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 100;
+            font-size: 14px;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    
+    <div id="ui">
+        <div>Score: <span id="score">0</span></div>
+        <div>Health: <span id="health">100</span></div>
+        <div>Player: <span id="playerPos">0,0,0</span></div>
+    </div>
+    
+    <div id="controls">
+        <h3>🎮 AI Hunter 3D</h3>
+        <p><strong>WASD</strong>: Move • <strong>Space</strong>: Jump • <strong>Mouse</strong>: Look</p>
+        <p>🤖 Avoid red enemies • 💎 Collect blue gems</p>
+    </div>
+    
+    <div id="debug">
+        <div>Status: <span id="status">Loading...</span></div>
+        <div>Keys: <span id="activeKeys">none</span></div>
+    </div>
+
+    <script>
+        // Simple 3D engine without Three.js dependency
+        class Simple3D {
+            constructor(canvas) {
+                this.canvas = canvas;
+                this.ctx = canvas.getContext('2d');
+                this.width = canvas.width = window.innerWidth;
+                this.height = canvas.height = window.innerHeight;
+                
+                this.camera = {
+                    x: 0, y: 5, z: 10,
+                    pitch: 0, yaw: 0
+                };
+                
+                this.objects = [];
+            }
+            
+            project(x, y, z) {
+                // Much stronger perspective projection
+                const distance = 200;  // Closer = bigger objects
+                const scale = distance / (distance + z);
+                return {
+                    x: (x * scale) + this.width / 2,
+                    y: (-y * scale) + this.height / 2,  // Flip Y axis for proper 3D
+                    scale: Math.max(0.1, scale)  // Minimum scale
+                };
+            }
+            
+            clear() {
+                this.ctx.fillStyle = '#87CEEB';
+                this.ctx.fillRect(0, 0, this.width, this.height);
+            }
+            
+            drawRect(x, y, z, width, height, color) {
+                const projected = this.project(
+                    x - this.camera.x,
+                    y - this.camera.y,
+                    z - this.camera.z
+                );
+                
+                if (projected.scale > 0) {
+                    this.ctx.fillStyle = color;
+                    const w = width * projected.scale;
+                    const h = height * projected.scale;
+                    this.ctx.fillRect(
+                        projected.x - w/2,
+                        projected.y - h/2,
+                        w, h
+                    );
+                }
+            }
+            
+            drawGround() {
+                // Draw a simple grid ground
+                this.ctx.strokeStyle = '#90EE90';
+                this.ctx.lineWidth = 1;
+                
+                for (let i = -50; i <= 50; i += 5) {
+                    // Vertical lines
+                    const start1 = this.project(i - this.camera.x, -this.camera.y, -50 - this.camera.z);
+                    const end1 = this.project(i - this.camera.x, -this.camera.y, 50 - this.camera.z);
+                    
+                    if (start1.scale > 0 && end1.scale > 0) {
+                        this.ctx.beginPath();
+                        this.ctx.moveTo(start1.x, start1.y);
+                        this.ctx.lineTo(end1.x, end1.y);
+                        this.ctx.stroke();
+                    }
+                    
+                    // Horizontal lines
+                    const start2 = this.project(-50 - this.camera.x, -this.camera.y, i - this.camera.z);
+                    const end2 = this.project(50 - this.camera.x, -this.camera.y, i - this.camera.z);
+                    
+                    if (start2.scale > 0 && end2.scale > 0) {
+                        this.ctx.beginPath();
+                        this.ctx.moveTo(start2.x, start2.y);
+                        this.ctx.lineTo(end2.x, end2.y);
+                        this.ctx.stroke();
+                    }
+                }
+            }
+        }
+        
+        // Game logic
+        class Game {
+            constructor() {
+                this.canvas = document.getElementById('gameCanvas');
+                this.renderer = new Simple3D(this.canvas);
+                
+                this.player = { x: 0, y: 2, z: 0 };
+                this.enemies = [];
+                this.powerUps = [];
+                this.keys = {};
+                this.score = 0;
+                this.health = 100;
+                
+                this.init();
+                this.setupControls();
+                this.gameLoop();
+            }
+            
+            init() {
+                // Create enemies - spawn them further away and slower
+                for (let i = 0; i < 3; i++) {
+                    this.enemies.push({
+                        x: Math.cos(i * 2.1) * 25,  // Further away
+                        y: 1,
+                        z: Math.sin(i * 2.1) * 25,  // Further away
+                        speed: 0.02 + Math.random() * 0.01  // Much slower
+                    });
+                }
+                
+                // Create power-ups closer to player
+                for (let i = 0; i < 3; i++) {
+                    this.powerUps.push({
+                        x: Math.cos(i * 2) * 8 + (Math.random() - 0.5) * 4,
+                        y: 2,
+                        z: Math.sin(i * 2) * 8 + (Math.random() - 0.5) * 4,
+                        rotation: 0
+                    });
+                }
+                
+                document.getElementById('status').textContent = 'Ready!';
+            }
+            
+            setupControls() {
+                document.addEventListener('keydown', (e) => {
+                    this.keys[e.code] = true;
+                    this.updateDebugKeys();
+                });
+                
+                document.addEventListener('keyup', (e) => {
+                    this.keys[e.code] = false;
+                    this.updateDebugKeys();
+                });
+                
+                // Mouse controls
+                this.canvas.addEventListener('click', () => {
+                    this.canvas.requestPointerLock();
+                });
+                
+                document.addEventListener('mousemove', (e) => {
+                    if (document.pointerLockElement === this.canvas) {
+                        this.renderer.camera.yaw += e.movementX * 0.005;
+                        this.renderer.camera.pitch -= e.movementY * 0.005;
+                        this.renderer.camera.pitch = Math.max(-1.5, Math.min(1.5, this.renderer.camera.pitch));
+                    }
+                });
+                
+                // Resize handler
+                window.addEventListener('resize', () => {
+                    this.renderer.width = this.canvas.width = window.innerWidth;
+                    this.renderer.height = this.canvas.height = window.innerHeight;
+                });
+            }
+            
+            updateDebugKeys() {
+                const activeKeys = Object.keys(this.keys).filter(key => this.keys[key]);
+                document.getElementById('activeKeys').textContent = activeKeys.join(', ') || 'none';
+            }
+            
+            updatePlayer() {
+                const moveSpeed = 0.3;
+                
+                // Movement with camera rotation
+                if (this.keys['KeyW']) {
+                    this.player.x -= Math.sin(this.renderer.camera.yaw) * moveSpeed;
+                    this.player.z -= Math.cos(this.renderer.camera.yaw) * moveSpeed;
+                }
+                if (this.keys['KeyS']) {
+                    this.player.x += Math.sin(this.renderer.camera.yaw) * moveSpeed;
+                    this.player.z += Math.cos(this.renderer.camera.yaw) * moveSpeed;
+                }
+                if (this.keys['KeyA']) {
+                    this.player.x -= Math.cos(this.renderer.camera.yaw) * moveSpeed;
+                    this.player.z += Math.sin(this.renderer.camera.yaw) * moveSpeed;
+                }
+                if (this.keys['KeyD']) {
+                    this.player.x += Math.cos(this.renderer.camera.yaw) * moveSpeed;
+                    this.player.z -= Math.sin(this.renderer.camera.yaw) * moveSpeed;
+                }
+                
+                // Jump
+                if (this.keys['Space'] && Math.abs(this.player.y - 2) < 0.1) {
+                    this.player.y = 4;
+                }
+                
+                // Gravity
+                if (this.player.y > 2) {
+                    this.player.y -= 0.1;
+                } else {
+                    this.player.y = 2;
+                }
+                
+                // Keep in bounds
+                this.player.x = Math.max(-20, Math.min(20, this.player.x));
+                this.player.z = Math.max(-20, Math.min(20, this.player.z));
+                
+                // Update camera to follow player - much closer
+                this.renderer.camera.x = this.player.x;
+                this.renderer.camera.y = this.player.y + 1;  // Much closer to ground
+                this.renderer.camera.z = this.player.z + 3;  // Much closer behind player
+            }
+            
+            updateEnemies() {
+                this.enemies.forEach(enemy => {
+                    // AI: Move towards player
+                    const dx = this.player.x - enemy.x;
+                    const dz = this.player.z - enemy.z;
+                    const distance = Math.sqrt(dx*dx + dz*dz);
+                    
+                    if (distance > 3) {  // Larger collision distance
+                        enemy.x += (dx / distance) * enemy.speed;
+                        enemy.z += (dz / distance) * enemy.speed;
+                    } else {
+                        // Damage player much less
+                        this.health -= 0.5;  // Much less damage
+                        if (this.health <= 0) {
+                            alert(`Game Over! Score: ${this.score}`);
+                            location.reload();
+                        }
+                    }
+                });
+            }
+            
+            updatePowerUps() {
+                this.powerUps.forEach((powerUp, index) => {
+                    powerUp.rotation += 0.05;
+                    
+                    const distance = Math.sqrt(
+                        (this.player.x - powerUp.x) ** 2 + 
+                        (this.player.z - powerUp.z) ** 2
+                    );
+                    
+                    if (distance < 4) {  // Easier to collect
+                        this.score += 100;
+                        this.health = Math.min(100, this.health + 25);
+                        
+                        // Respawn power-up further away
+                        powerUp.x = Math.cos(Math.random() * Math.PI * 2) * 15 + (Math.random() - 0.5) * 10;
+                        powerUp.z = Math.sin(Math.random() * Math.PI * 2) * 15 + (Math.random() - 0.5) * 10;
+                    }
+                });
+            }
+            
+            render() {
+                this.renderer.clear();
+                this.renderer.drawGround();
+                
+                // Draw player (green) - MASSIVE
+                this.drawBigRect(this.player.x, this.player.y, this.player.z, 15, 20, '#00ff00', '#004400');
+                
+                // Draw enemies (red) - MASSIVE
+                this.enemies.forEach(enemy => {
+                    this.drawBigRect(enemy.x, enemy.y, enemy.z, 20, 25, '#ff0000', '#440000');
+                });
+                
+                // Draw power-ups (cyan) - MASSIVE with animation
+                this.powerUps.forEach(powerUp => {
+                    this.drawBigRect(powerUp.x, powerUp.y + Math.sin(powerUp.rotation) * 1, powerUp.z, 12, 12, '#00ffff', '#004444');
+                });
+            }
+            
+            drawBigRect(x, y, z, width, height, fillColor, borderColor) {
+                const projected = this.renderer.project(
+                    x - this.renderer.camera.x,
+                    y - this.renderer.camera.y,
+                    z - this.renderer.camera.z
+                );
+                
+                if (projected.scale > 0) {
+                    const w = width * projected.scale * 2;  // Double size multiplier
+                    const h = height * projected.scale * 2; // Double size multiplier
+                    
+                    // Draw border
+                    this.renderer.ctx.fillStyle = borderColor;
+                    this.renderer.ctx.fillRect(
+                        projected.x - w/2 - 2,
+                        projected.y - h/2 - 2,
+                        w + 4, h + 4
+                    );
+                    
+                    // Draw main shape
+                    this.renderer.ctx.fillStyle = fillColor;
+                    this.renderer.ctx.fillRect(
+                        projected.x - w/2,
+                        projected.y - h/2,
+                        w, h
+                    );
+                }
+            }
+            
+            updateUI() {
+                document.getElementById('score').textContent = this.score;
+                document.getElementById('health').textContent = Math.max(0, this.health);
+                document.getElementById('playerPos').textContent = 
+                    `${this.player.x.toFixed(1)}, ${this.player.y.toFixed(1)}, ${this.player.z.toFixed(1)}`;
+                
+                this.score += 1;
+            }
+            
+            gameLoop() {
+                this.updatePlayer();
+                this.updateEnemies();
+                this.updatePowerUps();
+                this.render();
+                this.updateUI();
+                
+                requestAnimationFrame(() => this.gameLoop());
+            }
+        }
+        
+        // Start the game
+        window.addEventListener('load', () => {
+            new Game();
+        });
+    </script>
+</body>
+</html>

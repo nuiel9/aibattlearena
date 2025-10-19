@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Hunter 3D - Game Jam Edition</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #1e3c72, #2a5298);
+            overflow: hidden;
+            font-family: 'Arial', sans-serif;
+            color: white;
+        }
+        
+        #gameContainer {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+        
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+            font-size: 20px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+        }
+        
+        #instructions {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 100;
+            text-align: center;
+            background: rgba(0,0,0,0.7);
+            padding: 15px;
+            border-radius: 10px;
+        }
+        
+        #gameOver {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 200;
+            text-align: center;
+            background: rgba(0,0,0,0.9);
+            padding: 30px;
+            border-radius: 15px;
+            display: none;
+        }
+        
+        button {
+            background: #ff6b6b;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 10px;
+        }
+        
+        button:hover {
+            background: #ff5252;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <div id="ui">
+            <div>Score: <span id="score">0</span></div>
+            <div>Health: <span id="health">100</span></div>
+            <div>AI Enemies: <span id="enemies">0</span></div>
+        </div>
+        
+        <div id="instructions">
+            <h3>🎮 AI Hunter 3D</h3>
+            <p>WASD/Arrow Keys: Move • Mouse: Look Around • Space: Jump</p>
+            <p>🤖 Avoid red AI enemies • 💎 Collect blue power-ups • 🎯 Survive as long as possible!</p>
+        </div>
+        
+        <div id="gameOver">
+            <h2>Game Over!</h2>
+            <p>Final Score: <span id="finalScore">0</span></p>
+            <p>You survived against AI enemies for <span id="timeAlive">0</span> seconds!</p>
+            <button onclick="restartGame()">Play Again</button>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Game variables
+        let scene, camera, renderer;
+        let player, enemies = [], powerUps = [];
+        let gameState = {
+            score: 0,
+            health: 100,
+            isRunning: true,
+            startTime: Date.now(),
+            keys: {},
+            mouseX: 0,
+            mouseY: 0
+        };
+        
+        // Sound effects (using Web Audio API)
+        let audioContext;
+        function playSound(frequency, duration, type = 'sine', volume = 0.1) {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            
+            oscillator.frequency.value = frequency;
+            oscillator.type = type;
+            gainNode.gain.value = volume;
+            
+            oscillator.start();
+            oscillator.stop(audioContext.currentTime + duration);
+        }
+        
+        // Game settings
+        const WORLD_SIZE = 50;
+        const ENEMY_COUNT = 5;
+        const POWERUP_COUNT = 3;
+        
+        // Initialize the game
+        function init() {
+            // Create scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB);
+            scene.fog = new THREE.Fog(0x87CEEB, 0, 100);
+            
+            // Create camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 5, 10);
+            
+            // Create renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            document.getElementById('gameContainer').appendChild(renderer.domElement);
+            
+            // Add lighting
+            const ambientLight = new THREE.AmbientLight(0x404040, 0.4);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+            directionalLight.position.set(50, 50, 50);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.width = 2048;
+            directionalLight.shadow.mapSize.height = 2048;
+            scene.add(directionalLight);
+            
+            createWorld();
+            createPlayer();
+            createEnemies();
+            createPowerUps();
+            setupControls();
+            
+            animate();
+        }
+        
+        function createWorld() {
+            // Ground
+            const groundGeometry = new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE);
+            const groundMaterial = new THREE.MeshLambertMaterial({ color: 0x90EE90 });
+            const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+            ground.rotation.x = -Math.PI / 2;
+            ground.receiveShadow = true;
+            scene.add(ground);
+            
+            // Create some obstacles
+            for (let i = 0; i < 10; i++) {
+                const boxGeometry = new THREE.BoxGeometry(2, 3, 2);
+                const boxMaterial = new THREE.MeshLambertMaterial({ color: 0x8B4513 });
+                const box = new THREE.Mesh(boxGeometry, boxMaterial);
+                box.position.set(
+                    (Math.random() - 0.5) * WORLD_SIZE * 0.8,
+                    1.5,
+                    (Math.random() - 0.5) * WORLD_SIZE * 0.8
+                );
+                box.castShadow = true;
+                scene.add(box);
+            }
+        }
+        
+        function createPlayer() {
+            const playerGeometry = new THREE.CapsuleGeometry(0.5, 2);
+            const playerMaterial = new THREE.MeshLambertMaterial({ color: 0x00ff00 });
+            player = new THREE.Mesh(playerGeometry, playerMaterial);
+            player.position.set(0, 2, 0);
+            player.castShadow = true;
+            scene.add(player);
+        }
+        
+        function createEnemies() {
+            for (let i = 0; i < ENEMY_COUNT; i++) {
+                const enemyGeometry = new THREE.ConeGeometry(0.8, 2);
+                const enemyMaterial = new THREE.MeshLambertMaterial({ color: 0xff0000 });
+                const enemy = new THREE.Mesh(enemyGeometry, enemyMaterial);
+                
+                // Random spawn position
+                const angle = (i / ENEMY_COUNT) * Math.PI * 2;
+                const radius = 15 + Math.random() * 10;
+                enemy.position.set(
+                    Math.cos(angle) * radius,
+                    1,
+                    Math.sin(angle) * radius
+                );
+                
+                enemy.castShadow = true;
+                enemy.userData = {
+                    speed: 0.05 + Math.random() * 0.03,
+                    lastPlayerPos: player.position.clone(),
+                    huntTimer: 0
+                };
+                
+                enemies.push(enemy);
+                scene.add(enemy);
+            }
+        }
+        
+        function createPowerUps() {
+            for (let i = 0; i < POWERUP_COUNT; i++) {
+                const powerUpGeometry = new THREE.OctahedronGeometry(0.8);
+                const powerUpMaterial = new THREE.MeshLambertMaterial({ 
+                    color: 0x00ffff,
+                    emissive: 0x002244
+                });
+                const powerUp = new THREE.Mesh(powerUpGeometry, powerUpMaterial);
+                
+                powerUp.position.set(
+                    (Math.random() - 0.5) * WORLD_SIZE * 0.6,
+                    2,
+                    (Math.random() - 0.5) * WORLD_SIZE * 0.6
+                );
+                
+                powerUp.userData = {
+                    rotationSpeed: 0.02 + Math.random() * 0.02,
+                    bobSpeed: 0.05 + Math.random() * 0.03,
+                    bobOffset: Math.random() * Math.PI * 2,
+                    baseY: powerUp.position.y
+                };
+                
+                powerUps.push(powerUp);
+                scene.add(powerUp);
+            }
+        }
+        
+        function setupControls() {
+            document.addEventListener('keydown', (event) => {
+                gameState.keys[event.code] = true;
+            });
+            
+            document.addEventListener('keyup', (event) => {
+                gameState.keys[event.code] = false;
+            });
+            
+            document.addEventListener('mousemove', (event) => {
+                if (document.pointerLockElement === renderer.domElement) {
+                    gameState.mouseX += event.movementX * 0.002;
+                    gameState.mouseY = Math.max(-Math.PI/3, Math.min(Math.PI/3, gameState.mouseY - event.movementY * 0.002));
+                }
+            });
+            
+            renderer.domElement.addEventListener('click', () => {
+                renderer.domElement.requestPointerLock();
+            });
+        }
+        
+        function updatePlayer() {
+            if (!gameState.isRunning) return;
+            
+            const moveSpeed = 0.2;
+            const direction = new THREE.Vector3();
+            
+            // Movement
+            if (gameState.keys['KeyW'] || gameState.keys['ArrowUp']) {
+                direction.z -= moveSpeed;
+            }
+            if (gameState.keys['KeyS'] || gameState.keys['ArrowDown']) {
+                direction.z += moveSpeed;
+            }
+            if (gameState.keys['KeyA'] || gameState.keys['ArrowLeft']) {
+                direction.x -= moveSpeed;
+            }
+            if (gameState.keys['KeyD'] || gameState.keys['ArrowRight']) {
+                direction.x += moveSpeed;
+            }
+            
+            // Apply rotation to movement direction
+            direction.applyEuler(new THREE.Euler(0, gameState.mouseX, 0));
+            player.position.add(direction);
+            
+            // Keep player in bounds
+            const bound = WORLD_SIZE / 2 - 2;
+            player.position.x = Math.max(-bound, Math.min(bound, player.position.x));
+            player.position.z = Math.max(-bound, Math.min(bound, player.position.z));
+            
+            // Jump
+            if (gameState.keys['Space'] && Math.abs(player.position.y - 2) < 0.1) {
+                player.position.y = 4;
+                playSound(400, 0.2, 'sine', 0.05); // Jump sound
+            }
+            
+            // Gravity
+            if (player.position.y > 2) {
+                player.position.y -= 0.1;
+            } else {
+                player.position.y = 2;
+            }
+            
+            // Update camera
+            camera.position.copy(player.position);
+            camera.position.y += 3;
+            camera.position.z += 5;
+            camera.lookAt(player.position);
+            camera.rotation.x += gameState.mouseY;
+        }
+        
+        function updateEnemies() {
+            enemies.forEach((enemy, index) => {
+                const userData = enemy.userData;
+                
+                // AI Behavior: Hunt the player
+                const distanceToPlayer = enemy.position.distanceTo(player.position);
+                
+                if (distanceToPlayer > 1) {
+                    // Move towards player with some AI variation
+                    const direction = new THREE.Vector3()
+                        .subVectors(player.position, enemy.position)
+                        .normalize();
+                    
+                    // Add some randomness to make AI less predictable
+                    direction.x += (Math.random() - 0.5) * 0.2;
+                    direction.z += (Math.random() - 0.5) * 0.2;
+                    direction.normalize();
+                    
+                    enemy.position.add(direction.multiplyScalar(userData.speed));
+                    
+                    // Face the direction of movement
+                    enemy.lookAt(player.position);
+                } else {
+                    // Attack player
+                    if (gameState.health > 0) {
+                        gameState.health -= 2;
+                        playSound(150, 0.1, 'sawtooth', 0.05); // Damage sound
+                        if (gameState.health <= 0) {
+                            endGame();
+                        }
+                    }
+                }
+                
+                // Keep enemies in bounds
+                const bound = WORLD_SIZE / 2 - 1;
+                enemy.position.x = Math.max(-bound, Math.min(bound, enemy.position.x));
+                enemy.position.z = Math.max(-bound, Math.min(bound, enemy.position.z));
+                
+                // Increase difficulty over time
+                userData.speed = Math.min(0.1, userData.speed + 0.00001);
+            });
+        }
+        
+        function updatePowerUps() {
+            powerUps.forEach((powerUp, index) => {
+                const userData = powerUp.userData;
+                
+                // Rotate power-up
+                powerUp.rotation.y += userData.rotationSpeed;
+                
+                // Bob up and down
+                userData.bobOffset += userData.bobSpeed;
+                powerUp.position.y = userData.baseY + Math.sin(userData.bobOffset) * 0.5;
+                
+                // Check collision with player
+                if (powerUp.position.distanceTo(player.position) < 2) {
+                    // Collect power-up
+                    gameState.score += 100;
+                    gameState.health = Math.min(100, gameState.health + 25);
+                    playSound(800, 0.3, 'sine', 0.1); // Power-up sound
+                    
+                    // Remove and respawn
+                    scene.remove(powerUp);
+                    powerUps.splice(index, 1);
+                    
+                    // Spawn new power-up
+                    setTimeout(() => {
+                        const newPowerUp = createSinglePowerUp();
+                        powerUps.push(newPowerUp);
+                        scene.add(newPowerUp);
+                    }, 3000);
+                }
+            });
+        }
+        
+        function createSinglePowerUp() {
+            const powerUpGeometry = new THREE.OctahedronGeometry(0.8);
+            const powerUpMaterial = new THREE.MeshLambertMaterial({ 
+                color: 0x00ffff,
+                emissive: 0x002244
+            });
+            const powerUp = new THREE.Mesh(powerUpGeometry, powerUpMaterial);
+            
+            powerUp.position.set(
+                (Math.random() - 0.5) * WORLD_SIZE * 0.6,
+                2,
+                (Math.random() - 0.5) * WORLD_SIZE * 0.6
+            );
+            
+            powerUp.userData = {
+                rotationSpeed: 0.02 + Math.random() * 0.02,
+                bobSpeed: 0.05 + Math.random() * 0.03,
+                bobOffset: Math.random() * Math.PI * 2,
+                baseY: powerUp.position.y
+            };
+            
+            return powerUp;
+        }
+        
+        function updateUI() {
+            document.getElementById('score').textContent = gameState.score;
+            document.getElementById('health').textContent = Math.max(0, gameState.health);
+            document.getElementById('enemies').textContent = enemies.length;
+            
+            // Update score over time
+            gameState.score += 1;
+        }
+        
+        function endGame() {
+            gameState.isRunning = false;
+            playSound(100, 1.0, 'sawtooth', 0.1); // Game over sound
+            const timeAlive = Math.floor((Date.now() - gameState.startTime) / 1000);
+            document.getElementById('finalScore').textContent = gameState.score;
+            document.getElementById('timeAlive').textContent = timeAlive;
+            document.getElementById('gameOver').style.display = 'block';
+        }
+        
+        function restartGame() {
+            // Reset game state
+            gameState = {
+                score: 0,
+                health: 100,
+                isRunning: true,
+                startTime: Date.now(),
+                keys: {},
+                mouseX: 0,
+                mouseY: 0
+            };
+            
+            // Reset player position
+            player.position.set(0, 2, 0);
+            
+            // Reset enemies
+            enemies.forEach(enemy => {
+                const angle = Math.random() * Math.PI * 2;
+                const radius = 15 + Math.random() * 10;
+                enemy.position.set(
+                    Math.cos(angle) * radius,
+                    1,
+                    Math.sin(angle) * radius
+                );
+                enemy.userData.speed = 0.05 + Math.random() * 0.03;
+            });
+            
+            document.getElementById('gameOver').style.display = 'none';
+        }
+        
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            if (gameState.isRunning) {
+                updatePlayer();
+                updateEnemies();
+                updatePowerUps();
+                updateUI();
+            }
+            
+            renderer.render(scene, camera);
+        }
+        
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+        
+        // Start the game
+        init();
+    </script>
+</body>
+</html>
